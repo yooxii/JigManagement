@@ -1,3 +1,6 @@
+import sys
+import os
+import logging
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -16,35 +19,51 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QGroupBox,
+    QButtonGroup,
     QDialog,
     QSpacerItem,
     QSizePolicy,
+    QMessageBox,
+    QAbstractItemView,
 )
 from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt, QSortFilterProxyModel
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from .JigDialog import JigDialog
+from Model import Jig
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        logger.info("开始初始化主窗口")
         self.setWindowTitle(self.tr("治具管理系统"))
         self.resize(800, 600)
 
+        self.db_name = "db.db"
+
         self.db = QSqlDatabase.addDatabase("QSQLITE")
-        self.db.setDatabaseName("test.db")
+        self.db.setDatabaseName(self.db_name)
+        logger.info(f"设置数据库连接: {self.db_name}")
         if not self.db.open():
             err = "Error: ", self.db.lastError().text()
+            logger.error(f"数据库连接失败: {err}")
             raise Exception(err)
+        logger.info("数据库连接成功")
 
         self.setMainMenu()
         self.setMainWidget()
         self.setTable()
 
         self.setConnect()
+        logger.info("主窗口初始化完成")
 
     def setConnect(self):
         self.searchBtn.clicked.connect(self.searchTable)
@@ -52,6 +71,11 @@ class MainWindow(QMainWindow):
         self.action_alter.triggered.connect(self.JigAlter)
         self.action_delete.triggered.connect(self.JigDelete)
         self.action_exit.triggered.connect(self.close)
+        self.edit_makedate_st.dateChanged.connect(self.updataFilterDate)
+        self.edit_makedate_ed.dateChanged.connect(self.updataFilterDate)
+        self.edit_checkdate_st.dateChanged.connect(self.updataFilterDate)
+        self.edit_checkdate_ed.dateChanged.connect(self.updataFilterDate)
+        self.checkbox_group.buttonClicked.connect(self.applyAllFilters)
 
     def setMainWidget(self):
         self.centralWidget = QWidget()
@@ -67,11 +91,18 @@ class MainWindow(QMainWindow):
             40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
         )
 
+        self.checkbox_group = QButtonGroup()
+        self.checkbox_group.setExclusive(False)
+
         layout_makedate = QHBoxLayout()
         self.check_makedate = QCheckBox()
         label_makedate = QLabel(self.tr("制作日期："))
         self.edit_makedate_st = QDateEdit()
+        self.edit_makedate_st.setDisplayFormat("yyyy-MM-dd")
+        self.edit_makedate_st.setDate(QDate.currentDate().addDays(-1))
         self.edit_makedate_ed = QDateEdit()
+        self.edit_makedate_ed.setDisplayFormat("yyyy-MM-dd")
+        self.edit_makedate_ed.setDate(QDate.currentDate())
         layout_makedate.addWidget(self.check_makedate)
         layout_makedate.addWidget(label_makedate)
         layout_makedate.addWidget(self.edit_makedate_st)
@@ -85,7 +116,11 @@ class MainWindow(QMainWindow):
         self.check_checkdate = QCheckBox()
         label_checkdate = QLabel(self.tr("效验日期："))
         self.edit_checkdate_st = QDateEdit()
+        self.edit_checkdate_st.setDisplayFormat("yyyy-MM-dd")
+        self.edit_checkdate_st.setDate(QDate.currentDate().addDays(-1))
         self.edit_checkdate_ed = QDateEdit()
+        self.edit_checkdate_ed.setDisplayFormat("yyyy-MM-dd")
+        self.edit_checkdate_ed.setDate(QDate.currentDate())
         layout_checkdate.addItem(hSpacer)
         layout_checkdate.addWidget(self.check_checkdate)
         layout_checkdate.addWidget(label_checkdate)
@@ -100,12 +135,18 @@ class MainWindow(QMainWindow):
         self.check_usestatus = QCheckBox()
         self.label_usestatus = QLabel(self.tr("使用状态："))
         self.Combo_usestatus = QComboBox()
-        self.Combo_usestatus.addItems(["-", "使用中", "未使用", "异常"])
+        self.Combo_usestatus.addItems(["未使用", "使用中", "异常", "待报废"])
         layout_checkdate.addItem(hSpacer)
         layout_usestatus.addWidget(self.check_usestatus)
         layout_usestatus.addWidget(self.label_usestatus)
         layout_usestatus.addWidget(self.Combo_usestatus)
         self.layout_filter.addLayout(layout_usestatus, 0, 4, Qt.AlignmentFlag.AlignLeft)
+
+        # TODO: 筛选治具类型
+
+        self.checkbox_group.addButton(self.check_makedate)
+        self.checkbox_group.addButton(self.check_checkdate)
+        self.checkbox_group.addButton(self.check_usestatus)
 
         self.layout_search = QHBoxLayout()
         self.searchInput = QLineEdit()
@@ -151,6 +192,13 @@ class MainWindow(QMainWindow):
         self.model.setTable("Jig")
         self.model.select()
 
+        # 设置表头显示名称为Pydantic模型中的title
+        for i, field_name in enumerate(Jig.model_fields.keys()):
+            field_info = Jig.model_fields[field_name]
+            # 设置表头显示名称为Pydantic模型中的title
+            field_title = field_info.title or field_name
+            self.model.setHeaderData(i, Qt.Orientation.Horizontal, field_title)
+
         # 代理模型
         self.agent = QSortFilterProxyModel()
         self.agent.setSourceModel(self.model)
@@ -160,25 +208,102 @@ class MainWindow(QMainWindow):
         self.table = QTableView()
         self.table.setModel(self.agent)
         self.table.setSortingEnabled(True)
+        # 禁止在表格中修改
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # 设置表格拉伸
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
 
         self.mainLayout.addWidget(self.table)
 
     def searchTable(self):
         self.agent.setFilterRegularExpression(self.searchInput.text())
 
+    def updataFilterDate(self):
+        # TODO: 跟随最大或最小日期变化
+        self.edit_checkdate_ed.setMinimumDate(self.edit_checkdate_st.date())
+        self.edit_checkdate_st.setMaximumDate(self.edit_checkdate_ed.date())
+        self.edit_makedate_ed.setMinimumDate(self.edit_makedate_st.date())
+        self.edit_makedate_st.setMaximumDate(self.edit_makedate_ed.date())
+
     def JigAdd(self):
-        self.addDialog = JigDialog(self)
+        self.addDialog = JigDialog(self, self.agent)
         self.addDialog.show()
 
     def JigAlter(self):
-        self.alertDialog = JigDialog(self)
-        if self.table.selectedIndexes():
-            self.alertDialog.setDatas(
-                self.model.record(
-                    self.agent.mapToSource(self.table.selectedIndexes()[0]).row()
-                )
-            )
+        if self.table.selectionModel().selectedIndexes() == []:
+            # TODO: 弹出选择行数窗口
+            return
+
+        proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
+        self.alertDialog = JigDialog(self, self.agent, proxy_row_index)
+        self.alertDialog.setWindowTitle("修改治具")
         self.alertDialog.show()
 
     def JigDelete(self):
-        pass
+        if self.table.selectionModel().selectedIndexes() == []:
+            # TODO: 弹出选择行数窗口
+            return
+        # 完成删除
+        proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
+
+        # 获取源模型行索引
+        source_index = self.agent.mapToSource(self.agent.index(proxy_row_index, 0))
+        source_row = source_index.row()
+
+        # 确认删除操作
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            "确定要删除这条记录吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if reply == QMessageBox.Yes:
+            # 从源模型中删除行
+            self.model.removeRow(source_row)
+
+            # 提交更改到数据库
+            if not self.model.submitAll():
+                QMessageBox.critical(
+                    self, "错误", f"删除失败: {self.model.lastError().text()}"
+                )
+                self.model.revertAll()
+            else:
+                QMessageBox.information(self, "成功", "记录已删除")
+
+            # 刷新模型
+            self.model.select()
+
+    def applyAllFilters(self):
+        # 收集所有激活的过滤条件
+        filters = []
+
+        # 制作日期过滤
+        if self.check_makedate.isChecked():
+            start_date = self.edit_makedate_st.date().toString("yyyy-MM-dd")
+            end_date = self.edit_makedate_ed.date().toString("yyyy-MM-dd")
+            filters.append(f"Makedate BETWEEN '{start_date}' AND '{end_date}'")
+
+        # 效验日期过滤
+        if self.check_checkdate.isChecked():
+            start_date = self.edit_checkdate_st.date().toString("yyyy-MM-dd")
+            end_date = self.edit_checkdate_ed.date().toString("yyyy-MM-dd")
+            filters.append(f"Checkdate BETWEEN '{start_date}' AND '{end_date}'")
+
+        # 使用状态过滤
+        if self.check_usestatus.isChecked():
+            selected_status = self.Combo_usestatus.currentText()
+            if selected_status != "-":
+                filters.append(f"UseStatus = '{selected_status}'")
+
+        # 应用组合过滤条件
+        if filters:
+            combined_filter = " AND ".join(filters)
+            self.model.setFilter(combined_filter)
+        else:
+            self.model.setFilter("")
+
+        self.model.select()

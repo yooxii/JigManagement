@@ -1,9 +1,14 @@
+import logging
 import os
 import pandas as pd
 import sqlite3
 
 
 from faker import Faker
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 os.chdir(os.path.dirname(__file__))
 con = sqlite3.connect("test.db")
@@ -33,6 +38,13 @@ Jigs = pd.DataFrame(
 )
 # 打印第一行数据
 print(Jigs.head(1))
+logger.info("开始将Jigs数据写入数据库")
 Jigs.to_sql("Jig", con, index=False, if_exists="replace")
+logger.info("Jigs数据写入完成")
 
+logger.info("开始将jigTypes数据写入数据库")
 jigTypes.to_sql("JigType", con, index=False, if_exists="replace")
+logger.info("jigTypes数据写入完成")
+
+con.close()
+logger.info("数据库连接已关闭")
