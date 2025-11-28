@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import sys
 import os
 import logging
@@ -33,11 +34,13 @@ from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from .JigDialog import JigDialog
-from Model import Jig
+from Model import JigDynamic, JigType, JigUseStatus
+from custom_utils import Model2SQL
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 
 class MainWindow(QMainWindow):
@@ -47,16 +50,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.tr("治具管理系统"))
         self.resize(800, 600)
 
-        self.db_name = "db.db"
+        self.db_name = os.path.join(os.path.dirname(__file__), "..", "datas", "jig.db")
 
-        self.db = QSqlDatabase.addDatabase("QSQLITE")
-        self.db.setDatabaseName(self.db_name)
-        logger.info(f"设置数据库连接: {self.db_name}")
-        if not self.db.open():
-            err = "Error: ", self.db.lastError().text()
-            logger.error(f"数据库连接失败: {err}")
-            raise Exception(err)
-        logger.info("数据库连接成功")
+        self.setSQLite()
 
         self.setMainMenu()
         self.setMainWidget()
@@ -75,7 +71,31 @@ class MainWindow(QMainWindow):
         self.edit_makedate_ed.dateChanged.connect(self.updataFilterDate)
         self.edit_checkdate_st.dateChanged.connect(self.updataFilterDate)
         self.edit_checkdate_ed.dateChanged.connect(self.updataFilterDate)
+        self.Combo_usestatus.currentTextChanged.connect(self.applyAllFilters)
+        self.Combo_jigtype.currentTextChanged.connect(self.applyAllFilters)
         self.checkbox_group.buttonClicked.connect(self.applyAllFilters)
+
+    def setSQLite(self):
+        if not os.path.exists(self.db_name):
+            db_dir = os.path.dirname(self.db_name)
+            if not os.path.exists(db_dir):
+                os.makedirs(db_dir)
+                logger.info(f"创建数据库目录: {db_dir}")
+            Model2SQL.create_table_from_pydantic_model(
+                JigDynamic,
+                db_path=self.db_name,
+                table_name="jig",
+                recreate=True,
+            )
+
+        self.db = QSqlDatabase.addDatabase("QSQLITE")
+        self.db.setDatabaseName(self.db_name)
+        logger.info(f"设置数据库连接: {self.db_name}")
+        if not self.db.open():
+            err = "Error: ", self.db.lastError().text()
+            logger.error(f"数据库连接失败: {err}")
+            raise Exception(err)
+        logger.info("数据库连接成功")
 
     def setMainWidget(self):
         self.centralWidget = QWidget()
@@ -114,7 +134,7 @@ class MainWindow(QMainWindow):
 
         layout_checkdate = QHBoxLayout()
         self.check_checkdate = QCheckBox()
-        label_checkdate = QLabel(self.tr("效验日期："))
+        label_checkdate = QLabel(self.tr("校验日期："))
         self.edit_checkdate_st = QDateEdit()
         self.edit_checkdate_st.setDisplayFormat("yyyy-MM-dd")
         self.edit_checkdate_st.setDate(QDate.currentDate().addDays(-1))
@@ -135,18 +155,28 @@ class MainWindow(QMainWindow):
         self.check_usestatus = QCheckBox()
         self.label_usestatus = QLabel(self.tr("使用状态："))
         self.Combo_usestatus = QComboBox()
-        self.Combo_usestatus.addItems(["未使用", "使用中", "异常", "待报废"])
+        self.Combo_usestatus.addItems([i.value for i in list(JigUseStatus)])
         layout_checkdate.addItem(hSpacer)
         layout_usestatus.addWidget(self.check_usestatus)
         layout_usestatus.addWidget(self.label_usestatus)
         layout_usestatus.addWidget(self.Combo_usestatus)
         self.layout_filter.addLayout(layout_usestatus, 0, 4, Qt.AlignmentFlag.AlignLeft)
 
-        # TODO: 筛选治具类型
+        layout_jigtype = QHBoxLayout()
+        self.check_jigtype = QCheckBox()
+        self.label_jigtype = QLabel(self.tr("治具类型："))
+        self.Combo_jigtype = QComboBox()
+        self.Combo_jigtype.addItems([i.value for i in list(JigType)])
+        layout_jigtype.addItem(hSpacer)
+        layout_jigtype.addWidget(self.check_jigtype)
+        layout_jigtype.addWidget(self.label_jigtype)
+        layout_jigtype.addWidget(self.Combo_jigtype)
+        self.layout_filter.addLayout(layout_jigtype, 0, 6, Qt.AlignmentFlag.AlignLeft)
 
         self.checkbox_group.addButton(self.check_makedate)
         self.checkbox_group.addButton(self.check_checkdate)
         self.checkbox_group.addButton(self.check_usestatus)
+        self.checkbox_group.addButton(self.check_jigtype)
 
         self.layout_search = QHBoxLayout()
         self.searchInput = QLineEdit()
@@ -171,8 +201,9 @@ class MainWindow(QMainWindow):
         self.action_delete = QAction(self.tr("删除"))
         self.action_delete.setShortcut("Ctrl+D")
 
+        self.menu_option = self.menu.addMenu(self.tr("选项"))
+        self.action_jigtype = QAction(self.tr("治具类型管理"))
         self.action_settings = QAction(self.tr("设置"))
-        self.menu.addAction(self.action_settings)
 
         self.action_about = QAction(self.tr("关于"))
         self.menu.addAction(self.action_about)
@@ -184,6 +215,8 @@ class MainWindow(QMainWindow):
         self.menu_operation.addAction(self.action_add)
         self.menu_operation.addAction(self.action_alter)
         self.menu_operation.addAction(self.action_delete)
+        self.menu_option.addAction(self.action_jigtype)
+        self.menu_option.addAction(self.action_settings)
         self.setMenuWidget(self.menu)
 
     def setTable(self):
@@ -193,8 +226,8 @@ class MainWindow(QMainWindow):
         self.model.select()
 
         # 设置表头显示名称为Pydantic模型中的title
-        for i, field_name in enumerate(Jig.model_fields.keys()):
-            field_info = Jig.model_fields[field_name]
+        for i, field_name in enumerate(JigDynamic.model_fields.keys()):
+            field_info = JigDynamic.model_fields[field_name]
             # 设置表头显示名称为Pydantic模型中的title
             field_title = field_info.title or field_name
             self.model.setHeaderData(i, Qt.Orientation.Horizontal, field_title)
@@ -220,12 +253,50 @@ class MainWindow(QMainWindow):
     def searchTable(self):
         self.agent.setFilterRegularExpression(self.searchInput.text())
 
+
     def updataFilterDate(self):
         # TODO: 跟随最大或最小日期变化
         self.edit_checkdate_ed.setMinimumDate(self.edit_checkdate_st.date())
         self.edit_checkdate_st.setMaximumDate(self.edit_checkdate_ed.date())
         self.edit_makedate_ed.setMinimumDate(self.edit_makedate_st.date())
         self.edit_makedate_st.setMaximumDate(self.edit_makedate_ed.date())
+
+    def applyAllFilters(self):
+        # 收集所有激活的过滤条件
+        filters = []
+
+        # 制作日期过滤
+        if self.check_makedate.isChecked():
+            start_date = self.edit_makedate_st.date().toString("yyyy-MM-dd")
+            end_date = self.edit_makedate_ed.date().toString("yyyy-MM-dd")
+            filters.append(f"Makedate BETWEEN '{start_date}' AND '{end_date}'")
+
+        # 效验日期过滤
+        if self.check_checkdate.isChecked():
+            start_date = self.edit_checkdate_st.date().toString("yyyy-MM-dd")
+            end_date = self.edit_checkdate_ed.date().toString("yyyy-MM-dd")
+            filters.append(f"Checkdate BETWEEN '{start_date}' AND '{end_date}'")
+
+        # 使用状态过滤
+        if self.check_usestatus.isChecked():
+            selected_status = self.Combo_usestatus.currentText()
+            if selected_status != "-":
+                filters.append(f"UseStatus = '{selected_status}'")
+
+        # 治具类型过滤
+        if self.check_jigtype.isChecked():
+            selected_type = self.Combo_jigtype.currentText()
+            if selected_type != "-":
+                filters.append(f"Type = '{selected_type}'")
+
+        # 应用组合过滤条件
+        if filters:
+            combined_filter = " AND ".join(filters)
+            self.model.setFilter(combined_filter)
+        else:
+            self.model.setFilter("")
+
+        self.model.select()
 
     def JigAdd(self):
         self.addDialog = JigDialog(self, self.agent)
@@ -276,34 +347,3 @@ class MainWindow(QMainWindow):
 
             # 刷新模型
             self.model.select()
-
-    def applyAllFilters(self):
-        # 收集所有激活的过滤条件
-        filters = []
-
-        # 制作日期过滤
-        if self.check_makedate.isChecked():
-            start_date = self.edit_makedate_st.date().toString("yyyy-MM-dd")
-            end_date = self.edit_makedate_ed.date().toString("yyyy-MM-dd")
-            filters.append(f"Makedate BETWEEN '{start_date}' AND '{end_date}'")
-
-        # 效验日期过滤
-        if self.check_checkdate.isChecked():
-            start_date = self.edit_checkdate_st.date().toString("yyyy-MM-dd")
-            end_date = self.edit_checkdate_ed.date().toString("yyyy-MM-dd")
-            filters.append(f"Checkdate BETWEEN '{start_date}' AND '{end_date}'")
-
-        # 使用状态过滤
-        if self.check_usestatus.isChecked():
-            selected_status = self.Combo_usestatus.currentText()
-            if selected_status != "-":
-                filters.append(f"UseStatus = '{selected_status}'")
-
-        # 应用组合过滤条件
-        if filters:
-            combined_filter = " AND ".join(filters)
-            self.model.setFilter(combined_filter)
-        else:
-            self.model.setFilter("")
-
-        self.model.select()

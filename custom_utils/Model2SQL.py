@@ -126,7 +126,7 @@ def create_table_from_pydantic_model(
 
     if table_name is None:
         table_name = model_class.__name__.lower()
-    
+
     logger.info(f"开始创建表 {table_name}，数据库路径: {db_path}")
 
     # 生成完整 schema
@@ -152,14 +152,14 @@ def create_table_from_pydantic_model(
 
     columns_str = ",\n    ".join(column_defs)
     create_sql = f"CREATE TABLE {'IF NOT EXISTS' if not recreate else ''} {table_name} (\n    {columns_str}\n);"
-    
+
     if recreate:
         drop_sql = f"DROP TABLE IF EXISTS {table_name};"
 
     # 连接数据库并执行
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
+
     logger.debug(f"执行SQL: {create_sql}")
 
     try:
@@ -184,7 +184,9 @@ if __name__ == "__main__":
     import os
 
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-    from Model import Jig
+    from Model import JigDynamic
 
     # print(pydantic_model_to_sql_create_table(Jig))
-    create_table_from_pydantic_model(Jig, db_path="./db.db", recreate=True)
+    os.chdir(os.path.dirname(__file__))
+    db_path = "../datas/jig.db"
+    create_table_from_pydantic_model(JigDynamic, db_path=db_path, recreate=True)
