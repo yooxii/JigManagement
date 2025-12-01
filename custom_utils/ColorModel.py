@@ -6,6 +6,8 @@ from PySide6.QtCore import (
     QModelIndex,
     QAbstractItemModel,
     QDateTime,
+    QDate,
+    QTime,
 )
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 
@@ -29,7 +31,8 @@ def find_column_by_header(model: QAbstractItemModel, header_text: str) -> int:
     if not model:
         return -1
 
-    for col in range(model.columnCount()):
+    count = model.columnCount()
+    for col in range(count):
         header_data = model.headerData(col, Qt.Horizontal)
         # 转为字符串比较，兼容 QVariant 可能是 int 等类型
         if str(header_data) == header_text:
@@ -50,55 +53,72 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
             "校验周期（天）": None,
         }
 
+    def get_column_indices(self):
+        self._column_indices = {
+            header_text: find_column_by_header(self.sourceModel(), header_text)
+            for header_text in self._column_indices.keys()
+        }
+
     def set_column_indices(self, indices: dict):
         """手动设置列名到索引的映射"""
         self._column_indices.update(indices)
 
-    def data(self, index: QModelIndex, role=Qt.DisplayRole):
+    def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
 
         # 获取原始数据
         original_data = super().data(index, role)
 
-        if role == Qt.BackgroundRole:
+        if role == Qt.ItemDataRole.BackgroundRole:
             col_name = self.headerData(index.column(), Qt.Horizontal)
-            if col_name in ["最大使用次数", "单次校验可使用次数"]:
+            # 获取对应列的数据
+            row = index.row()
+            if col_name in ["已使用次数", "单次校验已使用次数"]:
                 # 只对这两个列进行逻辑判断
-                value = super().data(index, Qt.DisplayRole)
+                value = super().data(index, Qt.ItemDataRole.DisplayRole)
                 try:
                     val = int(value)
                 except (ValueError, TypeError):
                     return None
 
-                # 获取对应列的数据
-                row = index.row()
-                if col_name == "最大使用次数":
-                    used = self.get_value(row, "已使用次数")
-                    if used is not None and val - used < 100:
+                if col_name == "已使用次数":
+                    maxcount = self.get_value(row, "最大使用次数")
+                    if maxcount is not None and maxcount - val < 50:
                         return QBrush(QColor("red"))
-                elif col_name == "单次校验可使用次数":
-                    used = self.get_value(row, "单次校验已使用次数")
-                    if used is not None and val - used < 100:
+                elif col_name == "单次校验已使用次数":
+                    maxcount = self.get_value(row, "单次校验可使用次数")
+                    if maxcount is not None and maxcount - val < 50:
                         return QBrush(QColor("red"))
 
             # 判断“下一个校验日是否在前两周”
             elif col_name == "校验日期":
-                date_str = super().data(index, Qt.DisplayRole)
-                try:
-                    check_date = QDateTime.fromString(date_str, "yyyy-MM-dd").toDate()
-                    period_days = self.get_value(row, "校验周期（天）")
-                    next_check = check_date.addDays(int(period_days))
-                    today = QDateTime.currentDateTime().date()
+                date_str = super().data(index, Qt.ItemDataRole.DisplayRole)
+                if isinstance(date_str, str):
+                    check_date = QDateTime.fromString(date_str, "yyyy-MM-dd")
+                elif isinstance(date_str, QDateTime):
+                    check_date = date_str
+                elif isinstance(date_str, QDate):
+                    check_date = date_str.startOfDay()
+                else:
+                    raise ValueError("Invalid date format")
+                period_days = self.get_value(row, "校验周期（天）")
+                next_check = check_date.addDays(int(period_days))
+                today = QDateTime.currentDateTime()
 
-                    # 是否在前两周内？
-                    two_weeks_before = next_check.addDays(-14)
-                    if two_weeks_before <= today <= next_check:
-                        return QBrush(QColor("orange"))
-                except:
-                    pass
+                # 是否在前两周内？
+                two_weeks_before = next_check.addDays(-14)
+                if two_weeks_before <= today <= next_check:
+                    return QBrush(QColor("orange"))
 
         return original_data
+
+    def invalidate(self):
+        """
+        添加 invalidate 方法以兼容现有代码
+        """
+        self.beginResetModel()
+        self.endResetModel()
 
     def get_value(self, row: int, column_name: str):
         """获取指定行和列的值"""
@@ -108,4 +128,4 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
         index = self.index(row, col_idx)
         if not index.isValid():
             return None
-        return super().data(index, Qt.DisplayRole)
+        return super().data(index, Qt.ItemDataRole.DisplayRole)

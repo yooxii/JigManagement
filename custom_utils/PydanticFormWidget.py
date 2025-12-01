@@ -33,11 +33,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QGridLayout,
     QLayout,
-    QApplication,
     QMessageBox,
 )
 from PySide6.QtCore import Qt, QDate, QModelIndex, QSortFilterProxyModel
-from PySide6.QtSql import QSqlRecord
+from PySide6.QtSql import QSqlRecord, QSqlTableModel
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
@@ -152,6 +151,36 @@ def _get_ui_options(field_info) -> dict:
     if isinstance(extra, dict):
         return extra.get("ui", {})
     return {}
+
+
+def map_proxy_to_sql_record(proxy_model, proxy_row: int, column=0):
+    """
+    从任意层级的代理模型，递归映射到最底层的 QSqlTableModel，并返回 record。
+
+    :param proxy_model: 最外层的代理模型（如 QSortFilterProxyModel）
+    :param proxy_row: 代理模型中的行号
+    :param column: 用于构建索引的列（通常为 0）
+    :return: QSqlRecord 或 None
+    """
+    current_model = proxy_model
+    current_index = current_model.index(proxy_row, column)
+
+    # 递归向下映射，直到找到 QSqlTableModel
+    while current_model and not isinstance(current_model, QSqlTableModel):
+        if not current_index.isValid():
+            return None
+        # 映射到源模型
+        source_index = current_model.mapToSource(current_index)
+        if not source_index.isValid():
+            return None
+        current_model = current_model.sourceModel()
+        current_index = source_index
+
+    # 现在 current_model 是 QSqlTableModel
+    if isinstance(current_model, QSqlTableModel):
+        return current_model.record(current_index.row())
+
+    return None
 
 
 def _apply_widget_style(widget: QWidget, ui_options: dict):
@@ -631,19 +660,16 @@ class PydanticFormWidget(QWidget):
         self.load_from_dict(data)
 
     def load_from_proxy_row(self, proxy_row_index: int):
-        """从 QSortFilterProxyModel 的指定行加载数据"""
+        """从 QSortFilterProxyModel 的指定行加载数据（支持多层代理）"""
         if not self.proxy_model:
             return
 
-        # 将代理行号转换为源行号
-        source_index = self.proxy_model.mapToSource(
-            self.proxy_model.index(proxy_row_index, 0)
-        )
-        source_row = source_index.row()
-
-        # 从源模型加载记录
-        record = self.proxy_model.sourceModel().record(source_row)
-        self.load_from_record(record)
+        record = map_proxy_to_sql_record(self.proxy_model, proxy_row_index)
+        if record is not None:
+            self.load_from_record(record)
+            logger.info("从代理模型加载数据成功")
+        else:
+            logger.warning("无法获取有效记录")
 
     def _get_field_name_by_title(self, title: str) -> Optional[str]:
         """

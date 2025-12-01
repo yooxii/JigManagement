@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta
 import sys
 import os
 import logging
@@ -7,8 +6,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
     QTableView,
-    QTableWidget,
-    QTableWidgetItem,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -36,11 +33,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from .JigDialog import JigDialog
 from Model import JigDynamic, JigType, JigUseStatus
 from custom_utils import Model2SQL
+from custom_utils.ColorModel import ColoredSqlProxyModel
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 
 class MainWindow(QMainWindow):
@@ -232,9 +229,14 @@ class MainWindow(QMainWindow):
             field_title = field_info.title or field_name
             self.model.setHeaderData(i, Qt.Orientation.Horizontal, field_title)
 
+        # 颜色模型
+        self.color_model = ColoredSqlProxyModel()
+        self.color_model.setSourceModel(self.model)
+        self.color_model.get_column_indices()
+
         # 代理模型
         self.agent = QSortFilterProxyModel()
-        self.agent.setSourceModel(self.model)
+        self.agent.setSourceModel(self.color_model)
         self.agent.setFilterKeyColumn(-1)
 
         # 表格视图
@@ -252,7 +254,6 @@ class MainWindow(QMainWindow):
 
     def searchTable(self):
         self.agent.setFilterRegularExpression(self.searchInput.text())
-
 
     def updataFilterDate(self):
         # TODO: 跟随最大或最小日期变化
@@ -300,6 +301,7 @@ class MainWindow(QMainWindow):
 
     def JigAdd(self):
         self.addDialog = JigDialog(self, self.agent)
+        self.addDialog.JigUpdate.connect(self.JigUpdate)
         self.addDialog.show()
 
     def JigAlter(self):
@@ -310,40 +312,49 @@ class MainWindow(QMainWindow):
         proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
         self.alertDialog = JigDialog(self, self.agent, proxy_row_index)
         self.alertDialog.setWindowTitle("修改治具")
+        self.alertDialog.JigUpdate.connect(self.JigUpdate)
         self.alertDialog.show()
 
     def JigDelete(self):
         if self.table.selectionModel().selectedIndexes() == []:
             # TODO: 弹出选择行数窗口
             return
-        # 完成删除
-        proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
-
-        # 获取源模型行索引
-        source_index = self.agent.mapToSource(self.agent.index(proxy_row_index, 0))
-        source_row = source_index.row()
 
         # 确认删除操作
         reply = QMessageBox.question(
             self,
             "确认删除",
-            "确定要删除这条记录吗？",
+            "确定要删除这些记录吗？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
+        # 完成删除
+        for index in self.table.selectionModel().selectedRows():
+            proxy_row_index = index.row()
 
-        if reply == QMessageBox.Yes:
-            # 从源模型中删除行
-            self.model.removeRow(source_row)
+            # 获取源模型行索引
+            source_index = self.agent.mapToSource(self.agent.index(proxy_row_index, 0))
+            source_row = source_index.row()
 
-            # 提交更改到数据库
-            if not self.model.submitAll():
-                QMessageBox.critical(
-                    self, "错误", f"删除失败: {self.model.lastError().text()}"
-                )
-                self.model.revertAll()
-            else:
-                QMessageBox.information(self, "成功", "记录已删除")
+            if reply == QMessageBox.Yes:
+                # 从源模型中删除行
+                self.model.removeRow(source_row)
 
-            # 刷新模型
-            self.model.select()
+                # 提交更改到数据库
+                if not self.model.submitAll():
+                    QMessageBox.critical(
+                        self, "错误", f"删除失败: {self.model.lastError().text()}"
+                    )
+                    self.model.revertAll()
+                else:
+                    QMessageBox.information(self, "成功", "记录已删除")
+
+        # 刷新模型
+        self.model.select()
+        self.agent.invalidate()
+
+    def JigUpdate(self, proxy_row_index=None):
+        # 定位到新增的行
+        self.model.select()
+        self.agent.invalidate()
+        self.table.selectRow(self.agent.index(proxy_row_index, 0).row())

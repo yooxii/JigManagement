@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class JigDialog(QDialog):
-    JigUpdate = Signal()
+    JigUpdate = Signal(int)
 
     def __init__(self, parent=None, proxy_model=None, proxy_row_index=None, datas=None):
         super().__init__(parent)
@@ -37,5 +37,5 @@ class JigDialog(QDialog):
         self.mainlayout.addWidget(self.form)
 
     def closeEvent(self, arg__1):
-        self.JigUpdate.emit()
+        self.JigUpdate.emit(self.proxy_row_index)
         return super().closeEvent(arg__1)
