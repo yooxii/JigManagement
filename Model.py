@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import sqlite3
+import logging
 import pandas as pd
 from typing import List, Type
 
@@ -10,8 +11,49 @@ from pydantic import BaseModel, Field, create_model
 from enum import Enum
 from custom_utils.PydanticFormWidget import PydanticFormWidget, py_date
 
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 # 数据库文件路径
-db_enum_path = f"{os.path.join(os.path.dirname(__file__),'datas/enum.db')}"
+# 获取正确的基础路径
+if getattr(sys, "frozen", False):  # 检查是否为PyInstaller打包环境
+    # 如果是打包后的exe文件运行
+    data_path = os.path.dirname(sys.executable)
+else:
+    # 如果是普通Python脚本运行
+    data_path = os.path.dirname(os.path.abspath(__file__))
+data_path = os.path.join(data_path, "datas")
+if not os.path.exists(data_path):
+    os.makedirs(data_path)
+db_enum_path = os.path.join(data_path, "enum.db")
+logger.info(f"数据库文件路径：{db_enum_path}")
+
+
+def init_enum_from_db(
+    db_path: str,
+    init_datas=[
+        {"JigType": ["server", "pc", "adapter", "amz"]},
+        {"JigUseStatus": ["未使用", "使用中", "异常", "待报废"]},
+    ],
+) -> bool:
+    conn = sqlite3.connect(db_path)
+    try:
+        for init_data in init_datas:
+            for k in init_data.keys():
+                df = pd.DataFrame(init_data)
+                df.to_sql(k, conn, index=False, if_exists="replace")
+                logger.info(f"已创建表 {k}")
+    except Exception as e:
+        logger.error(f"❌ 初始化数据库失败: {e}", exc_info=True)
+        return False
+    finally:
+        conn.close()
+    return True
+
+
+if not os.path.exists(db_enum_path):
+    init_enum_from_db(db_enum_path)
 
 
 def load_enum_from_file(filepath: str, enum_name: str = "DynamicEnum") -> Type[Enum]:
@@ -45,29 +87,6 @@ def load_enum_from_db(
         data[str(i)] = row[0]
     return Enum(enum_name, data, type=str)
 
-
-def init_enum_from_db(
-    db_path: str,
-    init_datas=[
-        {"JigType": ["server", "pc", "adapter", "amz"]},
-        {"JigUseStatus": ["未使用", "使用中", "异常", "待报废"]},
-    ],
-) -> bool:
-    conn = sqlite3.connect(db_path)
-    try:
-        for init_data in init_datas:
-            for k in init_data.keys():
-                df = pd.DataFrame(init_data)
-                df.to_sql(k, conn, index=False, if_exists="replace")
-                print(f"已创建表 {k}")
-    except:
-        return False
-    conn.close()
-    return True
-
-
-if not os.path.exists(db_enum_path):
-    init_enum_from_db(db_enum_path)
 
 JigType = load_enum_from_db(db_enum_path, "JigType", "JigType")
 JigUseStatus = load_enum_from_db(db_enum_path, "JigUseStatus", "JigUseStatus")
@@ -150,7 +169,7 @@ fields = {
         int,
         Field(
             title="校验周期（天）",
-            default=360,
+            default=365,
             le=9999,
             json_schema_extra={"ui": {"row": 2, "col": 2}},
         ),

@@ -42,6 +42,16 @@ from custom_utils.ColorModel import ColoredSqlProxyModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 获取正确的基础路径
+if getattr(sys, "frozen", False):  # 检查是否为PyInstaller打包环境
+    # 如果是打包后的exe文件运行
+    data_path = os.path.dirname(sys.executable)
+else:
+    # 如果是普通Python脚本运行
+    data_path = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(data_path, "..")
+data_path = os.path.join(data_path, "datas")
+
 
 def export_table_to_file(
     parent,
@@ -133,8 +143,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.tr("治具管理系统"))
         self.resize(800, 600)
 
-        self.db_path = os.path.join(os.path.dirname(__file__), "..", "datas")
-        self.db_name = os.path.join(self.db_path, "jig.db")
+        self.db_name = os.path.join(data_path, "jig.db")
 
         self.setSQLite()
 
@@ -509,11 +518,11 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.Yes:
             return
-        Model.init_enum_from_db(self.db_path)
+        Model.init_enum_from_db(self.db_name)
 
     def on_jigtype_manage(self):
         self.db_jigtype = QSqlDatabase.addDatabase("QSQLITE")
-        self.db_jigtype_name = os.path.join(self.db_path, "enum.db")
+        self.db_jigtype_name = os.path.join(data_path, "enum.db")
         self.db_jigtype.setDatabaseName(self.db_jigtype_name)
 
         # 治具类型模型
