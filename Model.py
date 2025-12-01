@@ -11,7 +11,7 @@ from enum import Enum
 from custom_utils.PydanticFormWidget import PydanticFormWidget, py_date
 
 # 数据库文件路径
-db_path = f"{os.path.join(os.path.dirname(__file__),'datas/enum.db')}"
+db_enum_path = f"{os.path.join(os.path.dirname(__file__),'datas/enum.db')}"
 
 
 def load_enum_from_file(filepath: str, enum_name: str = "DynamicEnum") -> Type[Enum]:
@@ -66,8 +66,11 @@ def init_enum_from_db(
     return True
 
 
-JigType = load_enum_from_db(db_path, "JigType", "JigType")
-JigUseStatus = load_enum_from_db(db_path, "JigUseStatus", "JigUseStatus")
+if not os.path.exists(db_enum_path):
+    init_enum_from_db(db_enum_path)
+
+JigType = load_enum_from_db(db_enum_path, "JigType", "JigType")
+JigUseStatus = load_enum_from_db(db_enum_path, "JigUseStatus", "JigUseStatus")
 
 fields = {
     "id": (
@@ -139,6 +142,7 @@ fields = {
         int,
         Field(
             title="单次校验可使用次数",
+            default=2000,
             json_schema_extra={"ui": {"row": 4, "col": 2}, "maximum": 99999},
         ),
     ),

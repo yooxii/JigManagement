@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QButtonGroup,
     QDialog,
+    QFileDialog,
     QSpacerItem,
     QSizePolicy,
     QMessageBox,
@@ -27,17 +28,102 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
+import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from .JigDialog import JigDialog
 from Model import JigDynamic, JigType, JigUseStatus
+import Model
 from custom_utils import Model2SQL
 from custom_utils.ColorModel import ColoredSqlProxyModel
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def export_table_to_file(
+    parent,
+    model,
+    view=None,  # 新增：传入 QTableView 以获取选中行
+    export_selection_only=False,  # 是否只导出行
+    file_filter="CSV Files (*.csv);;Excel Files (*.xlsx);;Text Files (*.txt)",
+):
+    """
+    导出表格数据，支持全部或仅选中行。
+
+    :param parent: 父窗口
+    :param model: QAbstractItemModel（通常是代理模型）
+    :param view: QTableView（用于获取选中行，当 export_selection_only=True 时必需）
+    :param export_selection_only: 是否只导出选中行
+    :param file_filter: 文件类型过滤器
+    """
+    if not model or model.rowCount() == 0:
+        QMessageBox.warning(parent, "导出失败", "表格无数据")
+        return
+
+    # 获取要导出的行索引
+    if export_selection_only:
+        if not view:
+            raise ValueError("必须提供 QTableView 以导出选中行")
+        # 获取所有选中的行号（去重并排序）
+        selected_rows = sorted({index.row() for index in view.selectedIndexes()})
+        if not selected_rows:
+            QMessageBox.warning(parent, "导出失败", "请先选择要导出的行")
+            return
+    else:
+        # 导出所有行
+        selected_rows = list(range(model.rowCount()))
+
+    # 弹出保存对话框
+    file_path, selected_filter = QFileDialog.getSaveFileName(
+        parent, "导出表格数据", "", file_filter
+    )
+    if not file_path:
+        return
+
+    try:
+        # 自动补全扩展名
+        if selected_filter.startswith("Excel") and not file_path.endswith(".xlsx"):
+            file_path += ".xlsx"
+        elif selected_filter.startswith("CSV") and not file_path.endswith(".csv"):
+            file_path += ".csv"
+        elif selected_filter.startswith("Text") and not file_path.endswith(".txt"):
+            file_path += ".txt"
+
+        # 提取表头
+        headers = []
+        for col in range(model.columnCount()):
+            header = model.headerData(col, Qt.Horizontal)
+            headers.append(str(header) if header is not None else f"Column {col}")
+
+        # 提取选中行的数据
+        data = []
+        for row in selected_rows:
+            row_data = []
+            for col in range(model.columnCount()):
+                index = model.index(row, col)
+                value = model.data(index, Qt.DisplayRole)
+                row_data.append(value if value is not None else "")
+            data.append(row_data)
+
+        # 创建 DataFrame 并导出
+        df = pd.DataFrame(data, columns=headers)
+
+        if file_path.endswith(".xlsx"):
+            df.to_excel(file_path, index=False, engine="openpyxl")
+        elif file_path.endswith(".csv"):
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+        elif file_path.endswith(".txt"):
+            df.to_csv(file_path, index=False, sep="\t", encoding="utf-8")
+        else:
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+
+        QMessageBox.information(parent, "导出成功", f"数据已保存至：\n{file_path}")
+
+    except Exception as e:
+        QMessageBox.critical(parent, "导出失败", f"错误：{str(e)}")
 
 
 class MainWindow(QMainWindow):
@@ -47,7 +133,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.tr("治具管理系统"))
         self.resize(800, 600)
 
-        self.db_name = os.path.join(os.path.dirname(__file__), "..", "datas", "jig.db")
+        self.db_path = os.path.join(os.path.dirname(__file__), "..", "datas")
+        self.db_name = os.path.join(self.db_path, "jig.db")
 
         self.setSQLite()
 
@@ -60,9 +147,12 @@ class MainWindow(QMainWindow):
 
     def setConnect(self):
         self.searchBtn.clicked.connect(self.searchTable)
+        self.action_exportSelect.triggered.connect(self.on_export_selected_table)
+        self.action_exportAll.triggered.connect(self.on_export_all_table)
         self.action_add.triggered.connect(self.JigAdd)
         self.action_alter.triggered.connect(self.JigAlter)
         self.action_delete.triggered.connect(self.JigDelete)
+        self.action_initdb.triggered.connect(self.on_init_database)
         self.action_exit.triggered.connect(self.close)
         self.edit_makedate_st.dateChanged.connect(self.updataFilterDate)
         self.edit_makedate_ed.dateChanged.connect(self.updataFilterDate)
@@ -186,8 +276,9 @@ class MainWindow(QMainWindow):
         self.menu = self.menuBar()
 
         self.menu_file = self.menu.addMenu(self.tr("文件"))
-        self.action_import = QAction(self.tr("从文件中批量导入"))
-        self.action_export = QAction(self.tr("将选择的数据导出"))
+        self.action_import = QAction(self.tr("从文件中导入"))
+        self.action_exportSelect = QAction(self.tr("导出选择的数据"))
+        self.action_exportAll = QAction(self.tr("导出整张表格"))
         self.action_exit = QAction(self.tr("退出"))
 
         self.menu_operation = self.menu.addMenu(self.tr("操作"))
@@ -200,20 +291,23 @@ class MainWindow(QMainWindow):
 
         self.menu_option = self.menu.addMenu(self.tr("选项"))
         self.action_jigtype = QAction(self.tr("治具类型管理"))
+        self.action_initdb = QAction(self.tr("初始化数据库"))
         self.action_settings = QAction(self.tr("设置"))
 
         self.action_about = QAction(self.tr("关于"))
         self.menu.addAction(self.action_about)
 
         self.menu_file.addAction(self.action_import)
-        self.menu_file.addAction(self.action_export)
+        self.menu_file.addAction(self.action_exportSelect)
+        self.menu_file.addAction(self.action_exportAll)
         self.menu_file.addSeparator()
         self.menu_file.addAction(self.action_exit)
         self.menu_operation.addAction(self.action_add)
         self.menu_operation.addAction(self.action_alter)
         self.menu_operation.addAction(self.action_delete)
-        self.menu_option.addAction(self.action_jigtype)
-        self.menu_option.addAction(self.action_settings)
+        # self.menu_option.addAction(self.action_jigtype)
+        self.menu_option.addAction(self.action_initdb)
+        # self.menu_option.addAction(self.action_settings)
         self.setMenuWidget(self.menu)
 
     def setTable(self):
@@ -300,7 +394,7 @@ class MainWindow(QMainWindow):
         self.model.select()
 
     def JigAdd(self):
-        self.addDialog = JigDialog(self, self.agent)
+        self.addDialog = JigDialog(self, self.color_model)
         self.addDialog.JigUpdate.connect(self.JigUpdate)
         self.addDialog.show()
 
@@ -310,51 +404,120 @@ class MainWindow(QMainWindow):
             return
 
         proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
-        self.alertDialog = JigDialog(self, self.agent, proxy_row_index)
+        self.alertDialog = JigDialog(self, self.color_model, proxy_row_index)
         self.alertDialog.setWindowTitle("修改治具")
         self.alertDialog.JigUpdate.connect(self.JigUpdate)
         self.alertDialog.show()
 
     def JigDelete(self):
-        if self.table.selectionModel().selectedIndexes() == []:
-            # TODO: 弹出选择行数窗口
+        selected_proxy_rows = self.table.selectionModel().selectedRows()
+        if not selected_proxy_rows:
+            QMessageBox.warning(self, "提示", "请先选择要删除的行")
             return
 
-        # 确认删除操作
         reply = QMessageBox.question(
             self,
             "确认删除",
-            "确定要删除这些记录吗？",
+            f"确定要删除选中的 {len(selected_proxy_rows)} 条记录吗？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
-        # 完成删除
-        for index in self.table.selectionModel().selectedRows():
-            proxy_row_index = index.row()
+        if reply != QMessageBox.Yes:
+            return
 
-            # 获取源模型行索引
-            source_index = self.agent.mapToSource(self.agent.index(proxy_row_index, 0))
-            source_row = source_index.row()
+        # 获取源行号（去重 + 降序）
+        source_rows = set()
+        for proxy_index in selected_proxy_rows:
+            source_index = self.agent.mapToSource(proxy_index)
+            if source_index.isValid():
+                source_rows.add(source_index.row())
 
-            if reply == QMessageBox.Yes:
-                # 从源模型中删除行
-                self.model.removeRow(source_row)
+        source_rows = sorted(source_rows, reverse=True)
 
-                # 提交更改到数据库
-                if not self.model.submitAll():
-                    QMessageBox.critical(
-                        self, "错误", f"删除失败: {self.model.lastError().text()}"
-                    )
-                    self.model.revertAll()
-                else:
-                    QMessageBox.information(self, "成功", "记录已删除")
+        # 批量删除
+        for row in source_rows:
+            self.model.removeRow(row)
 
-        # 刷新模型
-        self.model.select()
-        self.agent.invalidate()
+        # 一次性提交
+        if not self.model.submitAll():
+            error = self.model.lastError().text()
+            QMessageBox.critical(self, "删除失败", f"数据库错误：{error}")
+            self.model.revertAll()
+            return
+
+        QMessageBox.information(self, "成功", "记录已成功删除")
+        self.table.clearSelection()
 
     def JigUpdate(self, proxy_row_index=None):
-        # 定位到新增的行
-        self.model.select()
-        self.agent.invalidate()
-        self.table.selectRow(self.agent.index(proxy_row_index, 0).row())
+        """
+        处理新增或修改后的定位
+
+        :param proxy_row_index:
+            - 修改时：传入被修改行在代理模型中的行号（int）
+            - 新增时：传 None，自动定位到新行
+        """
+        # 先刷新模型（确保数据同步）
+        self.model.select()  # 从数据库重新加载（可选，若 submitAll 已更新则非必需）
+        self.agent.invalidate()  # 刷新代理模型（重要！）
+
+        if proxy_row_index is not None:
+            # 修改：直接定位
+            index = self.agent.index(proxy_row_index, 0)
+            if index.isValid():
+                self.table.scrollTo(index, QAbstractItemView.PositionAtCenter)
+                self.table.selectRow(proxy_row_index)
+        else:
+            # 新增：尝试定位到“最新”行
+            # 方法：找到源模型最后一行，再映射到代理模型
+            source_row_count = self.model.rowCount()
+            if source_row_count == 0:
+                return
+
+            # 最后一行在源模型中的索引
+            last_source_row = source_row_count - 1
+            source_index = self.model.index(last_source_row, 0)
+
+            # 映射到代理模型
+            proxy_index = self.agent.mapFromSource(source_index)
+            if proxy_index.isValid():
+                proxy_row = proxy_index.row()
+                self.table.scrollTo(proxy_index, QAbstractItemView.PositionAtCenter)
+                self.table.selectRow(proxy_row)
+            else:
+                # 如果被过滤掉了，提示用户
+                QMessageBox.information(
+                    self, "提示", "新记录已保存，但当前筛选条件下不可见。"
+                )
+
+    def on_export_all_table(self):
+        model = self.table.model()
+
+        export_table_to_file(self, model)
+
+    def on_export_selected_table(self):
+        model = self.table.model()
+        export_table_to_file(self, model, view=self.table, export_selection_only=True)
+
+    def on_init_database(self):
+        # TODO: 初始化数据库
+        reply = QMessageBox.question(
+            self,
+            "提示-待完善功能",
+            "敏感操作，请确认权限！",
+            QMessageBox.Yes,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        Model.init_enum_from_db(self.db_path)
+
+    def on_jigtype_manage(self):
+        self.db_jigtype = QSqlDatabase.addDatabase("QSQLITE")
+        self.db_jigtype_name = os.path.join(self.db_path, "enum.db")
+        self.db_jigtype.setDatabaseName(self.db_jigtype_name)
+
+        # 治具类型模型
+        self.jigtype_model = QSqlTableModel(self, self.db_jigtype)
+        self.jigtype_model.setTable("JigType")
+
+        # TODO: 治具管理，待完善

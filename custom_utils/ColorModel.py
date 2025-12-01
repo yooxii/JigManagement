@@ -1,4 +1,3 @@
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QTableView
 from PySide6.QtGui import QAction, QColor, QBrush
 from PySide6.QtCore import (
     Qt,
@@ -9,7 +8,6 @@ from PySide6.QtCore import (
     QDate,
     QTime,
 )
-from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 
 import sys
 import os
@@ -80,7 +78,7 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
                 try:
                     val = int(value)
                 except (ValueError, TypeError):
-                    return None
+                    return original_data
 
                 if col_name == "已使用次数":
                     maxcount = self.get_value(row, "最大使用次数")
@@ -101,7 +99,7 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
                 elif isinstance(date_str, QDate):
                     check_date = date_str.startOfDay()
                 else:
-                    raise ValueError("Invalid date format")
+                    return original_data
                 period_days = self.get_value(row, "校验周期（天）")
                 next_check = check_date.addDays(int(period_days))
                 today = QDateTime.currentDateTime()
@@ -121,11 +119,13 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
         self.endResetModel()
 
     def get_value(self, row: int, column_name: str):
-        """获取指定行和列的值"""
+        if row < 0 or row >= self.rowCount():
+            return None
         col_idx = self._column_indices.get(column_name)
         if col_idx is None or col_idx < 0:
             return None
         index = self.index(row, col_idx)
         if not index.isValid():
             return None
-        return super().data(index, Qt.ItemDataRole.DisplayRole)
+        value = super().data(index, Qt.ItemDataRole.DisplayRole)
+        return value if value is not None else ""

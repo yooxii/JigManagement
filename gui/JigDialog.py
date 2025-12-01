@@ -27,6 +27,7 @@ class JigDialog(QDialog):
 
         self.mainlayout = QVBoxLayout()
         self.setLayout(self.mainlayout)
+        self.proxy_row_index = proxy_row_index
 
         self.form = PydanticFormWidget(
             JigDynamic,
