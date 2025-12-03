@@ -1,5 +1,5 @@
 from .EnumManageWin import EnumManageWin
 from .JigDialog import JigDialog
-from .mainWin import MainWindow
+from .SettingsDialog import SettingsDlg
 
-__all__ = ["MainWindow", "JigDialog", "EnumManageWin"]
+__all__ = ["JigDialog", "EnumManageWin", "SettingsDlg"]

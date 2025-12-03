@@ -2,7 +2,7 @@ import subprocess
 import sys
 import os
 import logging
-import configparser
+from configparser import ConfigParser
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -32,12 +32,12 @@ from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QPoint, QDate
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 import pandas as pd
+from rich import inspect
 
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from gui import EnumManageWin
-from gui import JigDialog
+from gui import EnumManageWin, JigDialog, SettingsDlg
 from Model import JigDynamic, JigType, JigUseStatus
 from custom_utils import Model2SQL
 from custom_utils.ColorModel import ColoredSqlProxyModel
@@ -141,8 +141,33 @@ def export_table_to_file(
 
 
 def init_config(config_path):
-    config = configparser.ConfigParser()
-    config["DEFAULT"]
+    config = ConfigParser()
+    config.add_section("颜色")
+    config.add_section("校验")
+    config.add_section("使用次数")
+    config.add_section("单次校验可使用次数")
+
+    config["颜色"]["警告"] = "orange"
+    config["颜色"]["严重警告"] = "red"
+    config["校验"]["前多少天警告"] = "14"
+    config["校验"]["过期是否加重警告"] = "是"
+    config["使用次数"]["剩余多少次警告"] = "50"
+    config["使用次数"]["剩余多少次严重警告"] = "10"
+    config["单次校验可使用次数"]["剩余多少次警告"] = "50"
+    config["单次校验可使用次数"]["剩余多少次严重警告"] = "10"
+    with open(config_path, "w", encoding="utf-8") as f:
+        config.write(f, space_around_delimiters=False)
+
+
+def read_settings():
+    config = ConfigParser()
+    config_path = os.path.join(root_path, "config.ini")
+    if not os.path.exists(config_path):
+        init_config(config_path)
+
+    config.read(config_path, encoding="utf-8")
+
+    return config
 
 
 class MainWindow(QMainWindow):
@@ -151,6 +176,8 @@ class MainWindow(QMainWindow):
         logger.info("开始初始化主窗口")
         self.setWindowTitle(self.tr("治具管理系统"))
         self.resize(800, 600)
+
+        self.config = read_settings()
 
         self.db_name = os.path.join(data_path, "jig.db")
 
@@ -162,6 +189,7 @@ class MainWindow(QMainWindow):
         self.setTableMenu()
 
         self.setConnect()
+        self.updateSettings()
         logger.info("主窗口初始化完成")
 
     ################### 初始化 #################
@@ -177,6 +205,7 @@ class MainWindow(QMainWindow):
         self.action_jigtype.triggered.connect(self.on_jigtype_manage)
         self.action_getjig.triggered.connect(self.getJig)
         self.action_returnjig.triggered.connect(self.returnJig)
+        self.action_settings.triggered.connect(self.show_settings)
 
         self.edit_makedate_st.dateChanged.connect(self.updataFilterDate)
         self.edit_makedate_ed.dateChanged.connect(self.updataFilterDate)
@@ -229,17 +258,15 @@ class MainWindow(QMainWindow):
         self.check_makedate = QCheckBox()
         label_makedate = QLabel(self.tr("制作日期："))
         self.edit_makedate_st = QDateEdit()
-        self.edit_makedate_st.setDisplayFormat("yyyy-MM-dd")
         self.edit_makedate_st.setCalendarPopup(True)
         self.edit_makedate_st.setDate(QDate.currentDate().addDays(-1))
         self.edit_makedate_ed = QDateEdit()
-        self.edit_makedate_ed.setDisplayFormat("yyyy-MM-dd")
         self.edit_makedate_ed.setCalendarPopup(True)
         self.edit_makedate_ed.setDate(QDate.currentDate())
         layout_makedate.addWidget(self.check_makedate)
         layout_makedate.addWidget(label_makedate)
         layout_makedate.addWidget(self.edit_makedate_st)
-        layout_makedate.addWidget(QLabel(self.tr("~")))
+        layout_makedate.addWidget(QLabel(self.tr("-")))
         layout_makedate.addWidget(self.edit_makedate_ed)
         self.layout_filter.addLayout(
             layout_makedate, 0, 0, 1, 2, Qt.AlignmentFlag.AlignLeft
@@ -249,18 +276,16 @@ class MainWindow(QMainWindow):
         self.check_checkdate = QCheckBox()
         label_checkdate = QLabel(self.tr("校验日期："))
         self.edit_checkdate_st = QDateEdit()
-        self.edit_checkdate_st.setDisplayFormat("yyyy-MM-dd")
         self.edit_checkdate_st.setCalendarPopup(True)
         self.edit_checkdate_st.setDate(QDate.currentDate().addDays(-1))
         self.edit_checkdate_ed = QDateEdit()
         self.edit_checkdate_ed.setCalendarPopup(True)
-        self.edit_checkdate_ed.setDisplayFormat("yyyy-MM-dd")
         self.edit_checkdate_ed.setDate(QDate.currentDate())
         layout_checkdate.addItem(hSpacer)
         layout_checkdate.addWidget(self.check_checkdate)
         layout_checkdate.addWidget(label_checkdate)
         layout_checkdate.addWidget(self.edit_checkdate_st)
-        layout_checkdate.addWidget(QLabel(self.tr("~")))
+        layout_checkdate.addWidget(QLabel(self.tr("-")))
         layout_checkdate.addWidget(self.edit_checkdate_ed)
         self.layout_filter.addLayout(
             layout_checkdate, 0, 2, 1, 2, Qt.AlignmentFlag.AlignLeft
@@ -550,16 +575,31 @@ class MainWindow(QMainWindow):
                 )
 
     ############## 设置 ##############
-    def read_settings(self):
-        config = configparser.ConfigParser()
-        config_path = os.path.join(root_path, "config.ini")
-        if not os.path.exists(config_path):
-            init_config(config_path)
+    def show_settings(self):
+        self.settings_dialog = SettingsDlg(self.config, self)
+        self.settings_dialog.setWindowTitle("设置")
+        self.settings_dialog.updateConfig.connect(self.updateSettings)
+        self.settings_dialog.show()
 
-        config.read("config.ini")
-
-        # TODO: 设置，待完善
-        return config
+    def updateSettings(self, config: ConfigParser = None):
+        if config:
+            self.config = config
+        self.color_model.color_serious = self.config["颜色"]["严重警告"]
+        self.color_model.color_warning = self.config["颜色"]["警告"]
+        self.color_model.count_Usedserious = int(
+            self.config["使用次数"]["剩余多少次严重警告"]
+        )
+        self.color_model.count_Usedwarning = int(
+            self.config["使用次数"]["剩余多少次警告"]
+        )
+        self.color_model.count_Checkserious = int(
+            self.config["单次校验可使用次数"]["剩余多少次严重警告"]
+        )
+        self.color_model.count_Checkwarning = int(
+            self.config["单次校验可使用次数"]["剩余多少次警告"]
+        )
+        self.color_model.date_Checkwarning = int(self.config["校验"]["前多少天警告"])
+        self.model.select()
 
     ############## 导出 ##############
     def on_export_all_table(self):

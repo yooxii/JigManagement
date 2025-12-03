@@ -1,4 +1,4 @@
-from PySide6.QtGui import QAction, QColor, QBrush
+from PySide6.QtGui import QColor, QBrush
 from PySide6.QtCore import (
     Qt,
     QIdentityProxyModel,
@@ -6,7 +6,6 @@ from PySide6.QtCore import (
     QAbstractItemModel,
     QDateTime,
     QDate,
-    QTime,
 )
 
 
@@ -42,14 +41,13 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
             "单次校验可使用次数": None,
             "校验周期（天）": None,
         }
-        self.init_values()
-
-    def init_values(self):
-        self.usedCount_serious = 50
-        self.usedCount_warning = 10
-        self.checkCount_serious = 50
-        self.checkCount_warning = 10
-        self.checkDate_warning = 14
+        self.color_serious = "red"
+        self.color_warning = "orange"
+        self.count_Usedserious = 10
+        self.count_Usedwarning = 50
+        self.count_Checkserious = 10
+        self.count_Checkwarning = 50
+        self.date_Checkwarning = 14
 
     def get_column_indices(self):
         self._column_indices = {
@@ -83,17 +81,17 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
                 if col_name == "已使用次数":
                     maxcount = self.get_value(row, "最大使用次数")
                     if maxcount is not None:
-                        if maxcount - val < self.usedCount_warning:
-                            return QBrush(QColor("red"))
-                        if maxcount - val < self.usedCount_serious:
-                            return QBrush(QColor("orange"))
+                        if maxcount - val <= self.count_Usedserious:
+                            return QBrush(QColor(self.color_serious))
+                        if maxcount - val <= self.count_Usedwarning:
+                            return QBrush(QColor(self.color_warning))
                 elif col_name == "单次校验已使用次数":
                     maxcount = self.get_value(row, "单次校验可使用次数")
                     if maxcount is not None:
-                        if maxcount - val < self.checkCount_warning:
-                            return QBrush(QColor("red"))
-                        if maxcount - val < self.checkCount_serious:
-                            return QBrush(QColor("orange"))
+                        if maxcount - val <= self.count_Checkserious:
+                            return QBrush(QColor(self.color_serious))
+                        if maxcount - val <= self.count_Checkwarning:
+                            return QBrush(QColor(self.color_warning))
 
             elif col_name == "校验日期":
                 date_str = super().data(index, Qt.ItemDataRole.DisplayRole)
@@ -109,11 +107,11 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
                 next_check = check_date.addDays(int(period_days))
                 today = QDateTime.currentDateTime()
 
-                two_weeks_before = next_check.addDays(-abs(self.checkDate_warning))
+                two_weeks_before = next_check.addDays(-abs(self.date_Checkwarning))
                 if two_weeks_before <= today <= next_check:
-                    return QBrush(QColor("orange"))
+                    return QBrush(QColor(self.color_warning))
                 if today > next_check:  # 是否已过校验日？
-                    return QBrush(QColor("red"))
+                    return QBrush(QColor(self.color_serious))
 
         return original_data
 

@@ -5,8 +5,7 @@ import logging
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from PySide6.QtWidgets import QDialog, QVBoxLayout
-from PySide6.QtCore import Qt, QDate, Signal
-from PySide6.QtSql import QSqlRecord
+from PySide6.QtCore import Signal
 from custom_utils.PydanticFormWidget import PydanticFormWidget
 
 from Model import JigDynamic
