@@ -1,6 +1,8 @@
+import subprocess
 import sys
 import os
 import logging
+import configparser
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -8,6 +10,7 @@ from PySide6.QtWidgets import (
     QTableView,
     QHeaderView,
     QLabel,
+    QMenu,
     QLineEdit,
     QComboBox,
     QCheckBox,
@@ -26,31 +29,32 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QDate
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QPoint, QDate
 from PySide6.QtSql import QSqlDatabase, QSqlTableModel
 import pandas as pd
 
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from .JigDialog import JigDialog
+from gui import EnumManageWin
+from gui import JigDialog
 from Model import JigDynamic, JigType, JigUseStatus
-import Model
 from custom_utils import Model2SQL
 from custom_utils.ColorModel import ColoredSqlProxyModel
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 获取正确的基础路径
 if getattr(sys, "frozen", False):  # 检查是否为PyInstaller打包环境
     # 如果是打包后的exe文件运行
-    data_path = os.path.dirname(sys.executable)
+    root_path = os.path.dirname(sys.executable)
 else:
     # 如果是普通Python脚本运行
-    data_path = os.path.dirname(os.path.abspath(__file__))
-    data_path = os.path.join(data_path, "..")
-data_path = os.path.join(data_path, "datas")
+    root_path = os.path.dirname(os.path.abspath(__file__))
+    root_path = os.path.join(root_path, "..")
+root_path = os.path.abspath(root_path)
+data_path = os.path.join(root_path, "datas")
 
 
 def export_table_to_file(
@@ -136,6 +140,11 @@ def export_table_to_file(
         QMessageBox.critical(parent, "导出失败", f"错误：{str(e)}")
 
 
+def init_config(config_path):
+    config = configparser.ConfigParser()
+    config["DEFAULT"]
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -150,10 +159,12 @@ class MainWindow(QMainWindow):
         self.setMainMenu()
         self.setMainWidget()
         self.setTable()
+        self.setTableMenu()
 
         self.setConnect()
         logger.info("主窗口初始化完成")
 
+    ################### 初始化 #################
     def setConnect(self):
         self.searchBtn.clicked.connect(self.searchTable)
         self.action_exportSelect.triggered.connect(self.on_export_selected_table)
@@ -163,6 +174,10 @@ class MainWindow(QMainWindow):
         self.action_delete.triggered.connect(self.JigDelete)
         self.action_initdb.triggered.connect(self.on_init_database)
         self.action_exit.triggered.connect(self.close)
+        self.action_jigtype.triggered.connect(self.on_jigtype_manage)
+        self.action_getjig.triggered.connect(self.getJig)
+        self.action_returnjig.triggered.connect(self.returnJig)
+
         self.edit_makedate_st.dateChanged.connect(self.updataFilterDate)
         self.edit_makedate_ed.dateChanged.connect(self.updataFilterDate)
         self.edit_checkdate_st.dateChanged.connect(self.updataFilterDate)
@@ -215,9 +230,11 @@ class MainWindow(QMainWindow):
         label_makedate = QLabel(self.tr("制作日期："))
         self.edit_makedate_st = QDateEdit()
         self.edit_makedate_st.setDisplayFormat("yyyy-MM-dd")
+        self.edit_makedate_st.setCalendarPopup(True)
         self.edit_makedate_st.setDate(QDate.currentDate().addDays(-1))
         self.edit_makedate_ed = QDateEdit()
         self.edit_makedate_ed.setDisplayFormat("yyyy-MM-dd")
+        self.edit_makedate_ed.setCalendarPopup(True)
         self.edit_makedate_ed.setDate(QDate.currentDate())
         layout_makedate.addWidget(self.check_makedate)
         layout_makedate.addWidget(label_makedate)
@@ -233,8 +250,10 @@ class MainWindow(QMainWindow):
         label_checkdate = QLabel(self.tr("校验日期："))
         self.edit_checkdate_st = QDateEdit()
         self.edit_checkdate_st.setDisplayFormat("yyyy-MM-dd")
+        self.edit_checkdate_st.setCalendarPopup(True)
         self.edit_checkdate_st.setDate(QDate.currentDate().addDays(-1))
         self.edit_checkdate_ed = QDateEdit()
+        self.edit_checkdate_ed.setCalendarPopup(True)
         self.edit_checkdate_ed.setDisplayFormat("yyyy-MM-dd")
         self.edit_checkdate_ed.setDate(QDate.currentDate())
         layout_checkdate.addItem(hSpacer)
@@ -303,6 +322,12 @@ class MainWindow(QMainWindow):
         self.action_initdb = QAction(self.tr("初始化数据库"))
         self.action_settings = QAction(self.tr("设置"))
 
+        self.action_getjig = QAction(self.tr("取出治具"))
+        self.menu.addAction(self.action_getjig)
+
+        self.action_returnjig = QAction(self.tr("归还治具"))
+        self.menu.addAction(self.action_returnjig)
+
         self.action_about = QAction(self.tr("关于"))
         self.menu.addAction(self.action_about)
 
@@ -314,10 +339,30 @@ class MainWindow(QMainWindow):
         self.menu_operation.addAction(self.action_add)
         self.menu_operation.addAction(self.action_alter)
         self.menu_operation.addAction(self.action_delete)
-        # self.menu_option.addAction(self.action_jigtype)
-        self.menu_option.addAction(self.action_initdb)
-        # self.menu_option.addAction(self.action_settings)
+        self.menu_option.addAction(self.action_jigtype)
+        # self.menu_option.addAction(self.action_initdb) # 不建议初始化数据库
+        self.menu_option.addAction(self.action_settings)
         self.setMenuWidget(self.menu)
+
+    def setTableMenu(self):
+        self.tableMenu = QMenu()
+        self.action_copy = QAction(self.tr("复制"))
+        self.action_copy.setShortcut("Ctrl+C")
+
+        self.tableMenu.addAction(self.action_copy)
+        self.tableMenu.addAction(self.action_getjig)
+        self.tableMenu.addAction(self.action_returnjig)
+
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        def show_menu(pos):
+            if self.table.selectedIndexes() != []:
+                global_pos = self.table.mapToGlobal(pos)
+                self.tableMenu.exec(global_pos)
+            else:
+                self.tableMenu.close()
+
+        self.table.customContextMenuRequested.connect(show_menu)
 
     def setTable(self):
         # 数据模型
@@ -355,6 +400,7 @@ class MainWindow(QMainWindow):
 
         self.mainLayout.addWidget(self.table)
 
+    ############## 筛选和搜索 ##############
     def searchTable(self):
         self.agent.setFilterRegularExpression(self.searchInput.text())
 
@@ -402,6 +448,7 @@ class MainWindow(QMainWindow):
 
         self.model.select()
 
+    ############## 添加、修改、删除 ##############
     def JigAdd(self):
         self.addDialog = JigDialog(self, self.color_model)
         self.addDialog.JigUpdate.connect(self.JigUpdate)
@@ -412,7 +459,10 @@ class MainWindow(QMainWindow):
             # TODO: 弹出选择行数窗口
             return
 
-        proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
+        # proxy_row_index = self.table.selectionModel().selectedIndexes()[0].row()
+        proxy_row_index = self.agent.mapToSource(
+            self.table.selectionModel().selectedIndexes()[0]
+        ).row()
         self.alertDialog = JigDialog(self, self.color_model, proxy_row_index)
         self.alertDialog.setWindowTitle("修改治具")
         self.alertDialog.JigUpdate.connect(self.JigUpdate)
@@ -471,10 +521,11 @@ class MainWindow(QMainWindow):
 
         if proxy_row_index is not None:
             # 修改：直接定位
-            index = self.agent.index(proxy_row_index, 0)
+            index = self.agent.mapFromSource(self.color_model.index(proxy_row_index, 0))
+            row_index = index.row()
             if index.isValid():
                 self.table.scrollTo(index, QAbstractItemView.PositionAtCenter)
-                self.table.selectRow(proxy_row_index)
+                self.table.selectRow(row_index)
         else:
             # 新增：尝试定位到“最新”行
             # 方法：找到源模型最后一行，再映射到代理模型
@@ -498,9 +549,21 @@ class MainWindow(QMainWindow):
                     self, "提示", "新记录已保存，但当前筛选条件下不可见。"
                 )
 
+    ############## 设置 ##############
+    def read_settings(self):
+        config = configparser.ConfigParser()
+        config_path = os.path.join(root_path, "config.ini")
+        if not os.path.exists(config_path):
+            init_config(config_path)
+
+        config.read("config.ini")
+
+        # TODO: 设置，待完善
+        return config
+
+    ############## 导出 ##############
     def on_export_all_table(self):
         model = self.table.model()
-
         export_table_to_file(self, model)
 
     def on_export_selected_table(self):
@@ -508,25 +571,60 @@ class MainWindow(QMainWindow):
         export_table_to_file(self, model, view=self.table, export_selection_only=True)
 
     def on_init_database(self):
-        # TODO: 初始化数据库
+        # 初始化数据库
         reply = QMessageBox.question(
             self,
             "提示-待完善功能",
             "敏感操作，请确认权限！",
-            QMessageBox.Yes,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.No,
         )
-        if reply != QMessageBox.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
-        Model.init_enum_from_db(self.db_name)
 
     def on_jigtype_manage(self):
-        self.db_jigtype = QSqlDatabase.addDatabase("QSQLITE")
-        self.db_jigtype_name = os.path.join(data_path, "enum.db")
-        self.db_jigtype.setDatabaseName(self.db_jigtype_name)
+        self.jigtypeDlg = EnumManageWin()
+        self.jigtypeDlg.setWindowTitle("治具类型管理")
+        self.jigtypeDlg.setTablename("JigType")
+        self.jigtypeDlg.load_from_db_to_listwidget()
+        self.jigtypeDlg.DataChanged.connect(self.restart_application)
+        self.jigtypeDlg.show()
 
-        # 治具类型模型
-        self.jigtype_model = QSqlTableModel(self, self.db_jigtype)
-        self.jigtype_model.setTable("JigType")
+    def getJig(self):
+        """取出治具"""
+        # TODO: 获取治具
+        pass
 
-        # TODO: 治具管理，待完善
+    def returnJig(self):
+        """归还治具"""
+        # TODO: 归还治具
+        pass
+
+    def restart_application(self):
+        # 执行清理工作
+        self.cleanup_before_restart()
+
+        # 使用 QTimer 延迟重启，确保当前事件循环完成
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(100, self._restart_process)
+
+    def cleanup_before_restart(self):
+        """
+        重启前的清理工作
+        """
+        # 关闭数据库连接
+        if hasattr(self, "db") and self.db.isOpen():
+            self.db.close()
+            logger.info("数据库连接已关闭")
+
+        # 可以添加其他清理逻辑
+        logger.info("执行重启前清理工作")
+
+    def _restart_process(self):
+        """
+        实际执行重启过程
+        """
+        QApplication.quit()
+        subprocess.Popen([sys.executable] + sys.argv)
+        sys.exit(0)

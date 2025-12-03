@@ -39,4 +39,5 @@ class JigDialog(QDialog):
 
     def closeEvent(self, arg__1):
         self.JigUpdate.emit(self.proxy_row_index)
+        logger.info("关闭JigDialog对话框")
         return super().closeEvent(arg__1)

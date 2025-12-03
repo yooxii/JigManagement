@@ -13,10 +13,9 @@ from custom_utils.PydanticFormWidget import PydanticFormWidget, py_date
 
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 # 数据库文件路径
-# 获取正确的基础路径
 if getattr(sys, "frozen", False):  # 检查是否为PyInstaller打包环境
     # 如果是打包后的exe文件运行
     data_path = os.path.dirname(sys.executable)
@@ -75,7 +74,8 @@ def load_enum_from_db(
         datas = cursor.execute(f"SELECT * FROM {table_name}").fetchall()
     except:
         if not init_enum_from_db(db_path):
-            raise Exception("无法初始化数据库")
+            logger.error("无法初始化enum数据库")
+            raise Exception("无法初始化enum数据库")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         datas = cursor.execute(f"SELECT * FROM {table_name}").fetchall()
@@ -85,6 +85,7 @@ def load_enum_from_db(
     data = {}
     for i, row in enumerate(datas):
         data[str(i)] = row[0]
+    logger.info(f"已加载 {enum_name}")
     return Enum(enum_name, data, type=str)
 
 

@@ -9,14 +9,6 @@ from PySide6.QtCore import (
     QTime,
 )
 
-import sys
-import os
-import logging
-
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-
-from Model import JigDynamic, JigType, JigUseStatus
-
 
 def find_column_by_header(model: QAbstractItemModel, header_text: str) -> int:
     """
@@ -50,6 +42,14 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
             "单次校验可使用次数": None,
             "校验周期（天）": None,
         }
+        self.init_values()
+
+    def init_values(self):
+        self.usedCount_serious = 50
+        self.usedCount_warning = 10
+        self.checkCount_serious = 50
+        self.checkCount_warning = 10
+        self.checkDate_warning = 14
 
     def get_column_indices(self):
         self._column_indices = {
@@ -82,14 +82,19 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
 
                 if col_name == "已使用次数":
                     maxcount = self.get_value(row, "最大使用次数")
-                    if maxcount is not None and maxcount - val < 50:
-                        return QBrush(QColor("red"))
+                    if maxcount is not None:
+                        if maxcount - val < self.usedCount_warning:
+                            return QBrush(QColor("red"))
+                        if maxcount - val < self.usedCount_serious:
+                            return QBrush(QColor("orange"))
                 elif col_name == "单次校验已使用次数":
                     maxcount = self.get_value(row, "单次校验可使用次数")
-                    if maxcount is not None and maxcount - val < 50:
-                        return QBrush(QColor("red"))
+                    if maxcount is not None:
+                        if maxcount - val < self.checkCount_warning:
+                            return QBrush(QColor("red"))
+                        if maxcount - val < self.checkCount_serious:
+                            return QBrush(QColor("orange"))
 
-            # 判断“下一个校验日是否在前两周”
             elif col_name == "校验日期":
                 date_str = super().data(index, Qt.ItemDataRole.DisplayRole)
                 if isinstance(date_str, str):
@@ -104,10 +109,11 @@ class ColoredSqlProxyModel(QIdentityProxyModel):
                 next_check = check_date.addDays(int(period_days))
                 today = QDateTime.currentDateTime()
 
-                # 是否在前两周内？
-                two_weeks_before = next_check.addDays(-14)
+                two_weeks_before = next_check.addDays(-abs(self.checkDate_warning))
                 if two_weeks_before <= today <= next_check:
                     return QBrush(QColor("orange"))
+                if today > next_check:  # 是否已过校验日？
+                    return QBrush(QColor("red"))
 
         return original_data
 
