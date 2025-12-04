@@ -766,6 +766,8 @@ class PydanticFormWidget(QWidget):
                     value = filtered_data[field_name]
                     if isinstance(value, py_date):
                         value = QDate(value.year, value.month, value.day)
+                    if isinstance(value, Enum):
+                        value = value.value
                     source_model.setData(source_model.index(source_row, i), value)
             logger.info(f"修改记录在行 {source_row}")
 

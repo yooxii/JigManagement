@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QButtonGroup,
     QDialog,
+    QFrame,
     QFileDialog,
     QSpacerItem,
     QSizePolicy,
@@ -40,7 +41,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from gui import EnumManageWin, JigDialog, SettingsDlg
 from Model import JigDynamic, JigType, JigUseStatus
 from custom_utils import Model2SQL
-from custom_utils.ColorModel import ColoredSqlProxyModel
+from custom_utils.ColorModel import ColoredSqlProxyModel, find_column_by_header
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -191,10 +192,32 @@ class MainWindow(QMainWindow):
         self.setConnect()
         self.updateSettings()
         logger.info("主窗口初始化完成")
+        self.getCols()
+
+    def getCols(self):
+        self.col_jigname = find_column_by_header(self.agent, "治具名称")
+        self.col_jigtype = find_column_by_header(self.agent, "治具类型")
+        self.col_jigmodel = find_column_by_header(self.agent, "适用机种")
+        self.col_jigno = find_column_by_header(self.agent, "治具编号")
+        self.col_usestatus = find_column_by_header(self.agent, "使用状态")
+        self.col_usecount = find_column_by_header(self.agent, "已使用次数")
+        self.col_checkcount = find_column_by_header(self.agent, "单次校验已使用次数")
 
     ################### 初始化 #################
     def setConnect(self):
         self.searchBtn.clicked.connect(self.searchTable)
+
+        self.btn_add.clicked.connect(self.JigAdd)
+        self.btn_alter.clicked.connect(self.JigAlter)
+        self.btn_delete.clicked.connect(self.JigDelete)
+        self.btn_getjig.clicked.connect(self.getJig)
+        self.btn_returnjig.clicked.connect(self.returnJig)
+        # self.btn_import.clicked.connect(self.importJig)
+        self.btn_exportselect.clicked.connect(self.on_export_selected_table)
+        self.btn_exportall.clicked.connect(self.on_export_all_table)
+        self.btn_restart.clicked.connect(self.restart_application)
+        self.btn_exit.clicked.connect(self.close)
+
         self.action_exportSelect.triggered.connect(self.on_export_selected_table)
         self.action_exportAll.triggered.connect(self.on_export_all_table)
         self.action_add.triggered.connect(self.JigAdd)
@@ -240,11 +263,49 @@ class MainWindow(QMainWindow):
     def setMainWidget(self):
         self.centralWidget = QWidget()
         self.setCentralWidget(self.centralWidget)
-        self.mainLayout = QVBoxLayout()
+        self.mainLayout = QHBoxLayout()
         self.centralWidget.setLayout(self.mainLayout)
 
+        self.controlLayout = QVBoxLayout()
+        self.mainLayout.addLayout(self.controlLayout)
+        self.controlLayout.addSpacing(10)
+        self.btn_add = QPushButton(self.tr("添加"))
+        self.controlLayout.addWidget(self.btn_add)
+        self.btn_alter = QPushButton(self.tr("修改"))
+        self.controlLayout.addWidget(self.btn_alter)
+        self.btn_delete = QPushButton(self.tr("删除"))
+        self.controlLayout.addWidget(self.btn_delete)
+        self.btn_jigtype = QPushButton(self.tr("治具类型管理"))
+        self.controlLayout.addWidget(self.btn_jigtype)
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.Shape.HLine)
+        line1.setFrameShadow(QFrame.Shadow.Sunken)
+        self.controlLayout.addWidget(line1)
+        self.btn_getjig = QPushButton(self.tr("取用治具"))
+        self.controlLayout.addWidget(self.btn_getjig)
+        self.btn_returnjig = QPushButton(self.tr("归还治具"))
+        self.controlLayout.addWidget(self.btn_returnjig)
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setFrameShadow(QFrame.Shadow.Sunken)
+        self.controlLayout.addWidget(line2)
+        self.btn_import = QPushButton(self.tr("导入"))
+        self.controlLayout.addWidget(self.btn_import)
+        self.btn_exportselect = QPushButton(self.tr("导出选择行"))
+        self.controlLayout.addWidget(self.btn_exportselect)
+        self.btn_exportall = QPushButton(self.tr("导出整个表格"))
+        self.controlLayout.addWidget(self.btn_exportall)
+        self.controlLayout.addStretch()
+        self.btn_restart = QPushButton(self.tr("重启"))
+        self.controlLayout.addWidget(self.btn_restart)
+        self.btn_exit = QPushButton(self.tr("退出"))
+        self.controlLayout.addWidget(self.btn_exit)
+
+        self.dataLayout = QVBoxLayout()
+        self.mainLayout.addLayout(self.dataLayout)
+
         self.group_filter = QGroupBox(self.tr("筛选"))
-        self.mainLayout.addWidget(self.group_filter)
+        self.dataLayout.addWidget(self.group_filter)
         self.layout_filter = QGridLayout(self.group_filter)
 
         hSpacer = QSpacerItem(
@@ -323,14 +384,14 @@ class MainWindow(QMainWindow):
         self.searchBtn = QPushButton(self.tr("搜索"))
         self.layout_search.addWidget(self.searchInput)
         self.layout_search.addWidget(self.searchBtn)
-        self.mainLayout.addLayout(self.layout_search)
+        self.dataLayout.addLayout(self.layout_search)
 
     def setMainMenu(self):
         self.menu = self.menuBar()
 
         self.menu_file = self.menu.addMenu(self.tr("文件"))
         self.action_import = QAction(self.tr("从文件中导入"))
-        self.action_exportSelect = QAction(self.tr("导出选择的数据"))
+        self.action_exportSelect = QAction(self.tr("导出选择行"))
         self.action_exportAll = QAction(self.tr("导出整张表格"))
         self.action_exit = QAction(self.tr("退出"))
 
@@ -347,7 +408,7 @@ class MainWindow(QMainWindow):
         self.action_initdb = QAction(self.tr("初始化数据库"))
         self.action_settings = QAction(self.tr("设置"))
 
-        self.action_getjig = QAction(self.tr("取出治具"))
+        self.action_getjig = QAction(self.tr("取用治具"))
         self.menu.addAction(self.action_getjig)
 
         self.action_returnjig = QAction(self.tr("归还治具"))
@@ -423,7 +484,7 @@ class MainWindow(QMainWindow):
             QHeaderView.ResizeMode.ResizeToContents
         )
 
-        self.mainLayout.addWidget(self.table)
+        self.dataLayout.addWidget(self.table)
 
     ############## 筛选和搜索 ##############
     def searchTable(self):
@@ -632,13 +693,81 @@ class MainWindow(QMainWindow):
 
     def getJig(self):
         """取出治具"""
-        # TODO: 获取治具
-        pass
+        if self.col_usestatus == -1:
+            return
+        proxy_row_index = self.agent.mapToSource(
+            self.table.selectionModel().selectedIndexes()[0]
+        ).row()
+        usestatus_index = self.model.index(proxy_row_index, self.col_usestatus)
+        usestatus = self.model.data(usestatus_index)
+        if usestatus == JigUseStatus.USING.value:
+            QMessageBox.information(self, self.tr("提示"), self.tr("治具在使用中"))
+            return
+        if usestatus == JigUseStatus.ERROR.value:
+            QMessageBox.information(self, self.tr("提示"), self.tr("治具异常"))
+            return
+        if usestatus == JigUseStatus.SCRAP.value:
+            QMessageBox.information(self, self.tr("提示"), self.tr("治具待报废"))
+            return
+        if usestatus == JigUseStatus.UNUSE.value:
+            jigname_index = self.model.index(proxy_row_index, self.col_jigname)
+            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
+            jigtype_index = self.model.index(proxy_row_index, self.col_jigtype)
+            jigmodel_index = self.model.index(proxy_row_index, self.col_jigmodel)
+            jigno = self.model.data(jigno_index)
+            jigname = self.model.data(jigname_index)
+            jigtype = self.model.data(jigtype_index)
+            jigmodel = self.model.data(jigmodel_index)
+            self.model.setData(usestatus_index, JigUseStatus.USING.value)
+            self.model.submitAll()
+            self.model.select()
+            msg = self.tr(
+                f"取用编号为{jigno}的{jigname}，适用于{jigtype}的{jigmodel}机种"
+            )
+            logger.info(msg)
+            QMessageBox.information(self, self.tr("取用"), msg)
+        else:
+            logger.error("异常的治具状态")
 
     def returnJig(self):
         """归还治具"""
-        # TODO: 归还治具
-        pass
+        if self.col_usestatus == -1:
+            return
+        proxy_row_index = self.agent.mapToSource(
+            self.table.selectionModel().selectedIndexes()[0]
+        ).row()
+        usestatus_index = self.model.index(proxy_row_index, self.col_usestatus)
+        usestatus = self.model.data(usestatus_index)
+        if usestatus == JigUseStatus.UNUSE.value:
+            QMessageBox.information(self, self.tr("提示"), self.tr("治具未在使用"))
+            return
+        if usestatus == JigUseStatus.ERROR.value:
+            QMessageBox.information(self, self.tr("提示"), self.tr("治具异常"))
+            return
+        if usestatus == JigUseStatus.SCRAP.value:
+            QMessageBox.information(self, self.tr("提示"), self.tr("治具待报废"))
+            return
+        if usestatus == JigUseStatus.USING.value:
+            usecount_index = self.model.index(proxy_row_index, self.col_usecount)
+            checkcount_index = self.model.index(proxy_row_index, self.col_checkcount)
+            jigname_index = self.model.index(proxy_row_index, self.col_jigname)
+            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
+            usecount = self.model.data(usecount_index)
+            checkcount = self.model.data(checkcount_index)
+            jigno = self.model.data(jigno_index)
+            jigname = self.model.data(jigname_index)
+            self.model.setData(usecount_index, usecount + 1)
+            self.model.setData(checkcount_index, checkcount + 1)
+            self.model.setData(usestatus_index, JigUseStatus.UNUSE.value)
+            self.model.submitAll()
+            self.model.select()
+            msg = self.tr(
+                f"编号为{jigno}的{jigname}已归还"
+            )
+            logger.info(msg)
+            QMessageBox.information(self, self.tr("归还"), msg)
+        else:
+            logger.error("异常的治具状态")
 
     def restart_application(self):
         # 执行清理工作

@@ -9,7 +9,7 @@ from typing import List, Type
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from pydantic import BaseModel, Field, create_model
 from enum import Enum
-from custom_utils.PydanticFormWidget import PydanticFormWidget, py_date
+from custom_utils.PydanticFormWidget import py_date
 
 
 # 配置日志
@@ -84,13 +84,20 @@ def load_enum_from_db(
 
     data = {}
     for i, row in enumerate(datas):
-        data[str(i)] = row[0]
+        data["_" + str(i)] = row[0]
     logger.info(f"已加载 {enum_name}")
     return Enum(enum_name, data, type=str)
 
 
 JigType = load_enum_from_db(db_enum_path, "JigType", "JigType")
-JigUseStatus = load_enum_from_db(db_enum_path, "JigUseStatus", "JigUseStatus")
+
+
+class JigUseStatus(Enum):
+    UNUSE = "未使用"
+    USING = "使用中"
+    ERROR = "异常"
+    SCRAP = "待报废"
+
 
 fields = {
     "id": (
