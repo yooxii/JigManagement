@@ -172,7 +172,7 @@ def read_settings():
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, user_role: str):
         super().__init__()
         logger.info("开始初始化主窗口")
         self.setWindowTitle(self.tr("治具管理系统"))
@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
         self.config = read_settings()
 
         self.db_name = os.path.join(data_path, "jig.db")
+        self.user_role = user_role
 
         self.setSQLite()
 
@@ -194,6 +195,8 @@ class MainWindow(QMainWindow):
         logger.info("主窗口初始化完成")
         self.getCols()
 
+        self.setPermission()
+
     def getCols(self):
         self.col_jigname = find_column_by_header(self.agent, "治具名称")
         self.col_jigtype = find_column_by_header(self.agent, "治具类型")
@@ -201,7 +204,9 @@ class MainWindow(QMainWindow):
         self.col_jigno = find_column_by_header(self.agent, "治具编号")
         self.col_usestatus = find_column_by_header(self.agent, "使用状态")
         self.col_usecount = find_column_by_header(self.agent, "已使用次数")
+        self.col_usemaxcount = find_column_by_header(self.agent, "最大使用次数")
         self.col_checkcount = find_column_by_header(self.agent, "单次校验已使用次数")
+        self.col_checkmaxcount = find_column_by_header(self.agent, "单次校验可使用次数")
 
     ################### 初始化 #################
     def setConnect(self):
@@ -223,7 +228,6 @@ class MainWindow(QMainWindow):
         self.action_add.triggered.connect(self.JigAdd)
         self.action_alter.triggered.connect(self.JigAlter)
         self.action_delete.triggered.connect(self.JigDelete)
-        self.action_initdb.triggered.connect(self.on_init_database)
         self.action_exit.triggered.connect(self.close)
         self.action_jigtype.triggered.connect(self.on_jigtype_manage)
         self.action_getjig.triggered.connect(self.getJig)
@@ -275,8 +279,8 @@ class MainWindow(QMainWindow):
         self.controlLayout.addWidget(self.btn_alter)
         self.btn_delete = QPushButton(self.tr("删除"))
         self.controlLayout.addWidget(self.btn_delete)
-        self.btn_jigtype = QPushButton(self.tr("治具类型管理"))
-        self.controlLayout.addWidget(self.btn_jigtype)
+        # self.btn_jigtype = QPushButton(self.tr("治具类型管理"))
+        # self.controlLayout.addWidget(self.btn_jigtype)
         line1 = QFrame()
         line1.setFrameShape(QFrame.Shape.HLine)
         line1.setFrameShadow(QFrame.Shadow.Sunken)
@@ -296,7 +300,7 @@ class MainWindow(QMainWindow):
         self.btn_exportall = QPushButton(self.tr("导出整个表格"))
         self.controlLayout.addWidget(self.btn_exportall)
         self.controlLayout.addStretch()
-        self.btn_restart = QPushButton(self.tr("重启"))
+        self.btn_restart = QPushButton(self.tr("重新登陆"))
         self.controlLayout.addWidget(self.btn_restart)
         self.btn_exit = QPushButton(self.tr("退出"))
         self.controlLayout.addWidget(self.btn_exit)
@@ -483,8 +487,21 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
+        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
         self.dataLayout.addWidget(self.table)
+
+    def setPermission(self):
+        if self.user_role not in ["user", "admin"]:
+            self.action_add.setEnabled(False)
+            self.action_alter.setEnabled(False)
+            self.action_delete.setEnabled(False)
+            self.action_jigtype.setEnabled(False)
+            self.action_import.setEnabled(False)
+            self.btn_add.setEnabled(False)
+            self.btn_alter.setEnabled(False)
+            self.btn_delete.setEnabled(False)
+            self.btn_import.setEnabled(False)
 
     ############## 筛选和搜索 ##############
     def searchTable(self):
@@ -671,26 +688,7 @@ class MainWindow(QMainWindow):
         model = self.table.model()
         export_table_to_file(self, model, view=self.table, export_selection_only=True)
 
-    def on_init_database(self):
-        # 初始化数据库
-        reply = QMessageBox.question(
-            self,
-            "提示-待完善功能",
-            "敏感操作，请确认权限！",
-            QMessageBox.StandardButton.Yes,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-    def on_jigtype_manage(self):
-        self.jigtypeDlg = EnumManageWin()
-        self.jigtypeDlg.setWindowTitle("治具类型管理")
-        self.jigtypeDlg.setTablename("JigType")
-        self.jigtypeDlg.load_from_db_to_listwidget()
-        self.jigtypeDlg.DataChanged.connect(self.restart_application)
-        self.jigtypeDlg.show()
-
+    ############## 治具取出和归还 ##############
     def getJig(self):
         """取出治具"""
         if self.col_usestatus == -1:
@@ -710,13 +708,41 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, self.tr("提示"), self.tr("治具待报废"))
             return
         if usestatus == JigUseStatus.UNUSE.value:
+            usecount_index = self.model.index(proxy_row_index, self.col_usecount)
+            usecount = self.model.data(usecount_index)
+            usemaxcount_index = self.model.index(proxy_row_index, self.col_usemaxcount)
+            usemaxcount = self.model.data(usemaxcount_index)
+            checkcount_index = self.model.index(proxy_row_index, self.col_checkcount)
+            checkcount = self.model.data(checkcount_index)
+            checkmaxcount_index = self.model.index(
+                proxy_row_index, self.col_checkmaxcount
+            )
+            checkmaxcount = self.model.data(checkmaxcount_index)
+            warning = ""
+            if usecount >= usemaxcount:
+                warning += self.tr("使用次数 ")
+            if checkcount >= checkmaxcount:
+                warning += self.tr("单次校验使用次数 ")
+            if warning != "":
+                warning += self.tr("已达上限!") + "\n"
+                reply = QMessageBox.warning(
+                    self,
+                    self.tr("警告"),
+                    warning + self.tr("是否继续取用？"),
+                    buttons=QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No,
+                    defaultButton=QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
             jigname_index = self.model.index(proxy_row_index, self.col_jigname)
-            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
-            jigtype_index = self.model.index(proxy_row_index, self.col_jigtype)
-            jigmodel_index = self.model.index(proxy_row_index, self.col_jigmodel)
-            jigno = self.model.data(jigno_index)
             jigname = self.model.data(jigname_index)
+            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
+            jigno = self.model.data(jigno_index)
+            jigtype_index = self.model.index(proxy_row_index, self.col_jigtype)
             jigtype = self.model.data(jigtype_index)
+            jigmodel_index = self.model.index(proxy_row_index, self.col_jigmodel)
             jigmodel = self.model.data(jigmodel_index)
             self.model.setData(usestatus_index, JigUseStatus.USING.value)
             self.model.submitAll()
@@ -749,25 +775,40 @@ class MainWindow(QMainWindow):
             return
         if usestatus == JigUseStatus.USING.value:
             usecount_index = self.model.index(proxy_row_index, self.col_usecount)
-            checkcount_index = self.model.index(proxy_row_index, self.col_checkcount)
-            jigname_index = self.model.index(proxy_row_index, self.col_jigname)
-            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
             usecount = self.model.data(usecount_index)
+            checkcount_index = self.model.index(proxy_row_index, self.col_checkcount)
             checkcount = self.model.data(checkcount_index)
-            jigno = self.model.data(jigno_index)
+            jigname_index = self.model.index(proxy_row_index, self.col_jigname)
             jigname = self.model.data(jigname_index)
+            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
+            jigno = self.model.data(jigno_index)
             self.model.setData(usecount_index, usecount + 1)
             self.model.setData(checkcount_index, checkcount + 1)
             self.model.setData(usestatus_index, JigUseStatus.UNUSE.value)
             self.model.submitAll()
             self.model.select()
-            msg = self.tr(
-                f"编号为{jigno}的{jigname}已归还"
-            )
+            msg = self.tr(f"编号为{jigno}的{jigname}已归还")
             logger.info(msg)
             QMessageBox.information(self, self.tr("归还"), msg)
         else:
             logger.error("异常的治具状态")
+
+    ############### 其他 ##############
+    def on_jigtype_manage(self):
+        self.jigtypeDlg = EnumManageWin()
+        self.jigtypeDlg.setWindowTitle("治具类型管理")
+        self.jigtypeDlg.setTablename("JigType")
+        self.jigtypeDlg.load_from_db_to_listwidget()
+        self.jigtypeDlg.DataChanged.connect(self.restart_application)
+        self.jigtypeDlg.show()
+
+    def closeEvent(self, event):
+        # 关闭数据库连接
+        if hasattr(self, "db") and self.db.isOpen():
+            self.db.close()
+            logger.info("数据库连接已关闭")
+        logger.info("程序关闭")
+        return super().closeEvent(event)
 
     def restart_application(self):
         # 执行清理工作
@@ -776,7 +817,7 @@ class MainWindow(QMainWindow):
         # 使用 QTimer 延迟重启，确保当前事件循环完成
         from PySide6.QtCore import QTimer
 
-        QTimer.singleShot(100, self._restart_process)
+        QTimer.singleShot(10, self._restart_process)
 
     def cleanup_before_restart(self):
         """
