@@ -172,7 +172,7 @@ def read_settings():
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, user_role: str):
+    def __init__(self, user_role: str, email=None):
         super().__init__()
         logger.info("开始初始化主窗口")
         self.setWindowTitle(self.tr("治具管理系统"))
@@ -182,12 +182,13 @@ class MainWindow(QMainWindow):
 
         self.db_name = os.path.join(data_path, "jig.db")
         self.user_role = user_role
+        self.email = email
 
         self.setSQLite()
 
         self.setMainMenu()
         self.setMainWidget()
-        self.setTable()
+        self.setModel()
         self.setTableMenu()
 
         self.setConnect()
@@ -247,7 +248,7 @@ class MainWindow(QMainWindow):
             db_dir = os.path.dirname(self.db_name)
             if not os.path.exists(db_dir):
                 os.makedirs(db_dir)
-                logger.info(f"创建数据库目录: {db_dir}")
+                logger.debug(f"创建数据库目录: {db_dir}")
             Model2SQL.create_table_from_pydantic_model(
                 JigDynamic,
                 db_path=self.db_name,
@@ -257,7 +258,7 @@ class MainWindow(QMainWindow):
 
         self.db = QSqlDatabase.addDatabase("QSQLITE")
         self.db.setDatabaseName(self.db_name)
-        logger.info(f"设置数据库连接: {self.db_name}")
+        logger.debug(f"设置数据库连接: {self.db_name}")
         if not self.db.open():
             err = "Error: ", self.db.lastError().text()
             logger.error(f"数据库连接失败: {err}")
@@ -300,7 +301,7 @@ class MainWindow(QMainWindow):
         self.btn_exportall = QPushButton(self.tr("导出整个表格"))
         self.controlLayout.addWidget(self.btn_exportall)
         self.controlLayout.addStretch()
-        self.btn_restart = QPushButton(self.tr("重新登陆"))
+        self.btn_restart = QPushButton(self.tr("重新登录"))
         self.controlLayout.addWidget(self.btn_restart)
         self.btn_exit = QPushButton(self.tr("退出"))
         self.controlLayout.addWidget(self.btn_exit)
@@ -439,9 +440,16 @@ class MainWindow(QMainWindow):
         self.action_copy = QAction(self.tr("复制"))
         self.action_copy.setShortcut("Ctrl+C")
 
+        self.action_reflesh = QAction(self.tr("刷新"))
+        self.action_reflesh.setShortcut("F5")
+
+        self.tableMenu.addAction(self.action_reflesh)
         self.tableMenu.addAction(self.action_copy)
         self.tableMenu.addAction(self.action_getjig)
         self.tableMenu.addAction(self.action_returnjig)
+
+        self.action_reflesh.triggered.connect(self.reflesh)
+        self.action_copy.triggered.connect(self.rowCopy)
 
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
@@ -454,7 +462,7 @@ class MainWindow(QMainWindow):
 
         self.table.customContextMenuRequested.connect(show_menu)
 
-    def setTable(self):
+    def setModel(self):
         # 数据模型
         self.model = QSqlTableModel(self, self.db)
         self.model.setTable("Jig")
@@ -487,7 +495,9 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
-        self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
 
         self.dataLayout.addWidget(self.table)
 
@@ -618,9 +628,7 @@ class MainWindow(QMainWindow):
             - 修改时：传入被修改行在代理模型中的行号（int）
             - 新增时：传 None，自动定位到新行
         """
-        # 先刷新模型（确保数据同步）
-        self.model.select()  # 从数据库重新加载（可选，若 submitAll 已更新则非必需）
-        self.agent.invalidate()  # 刷新代理模型（重要！）
+        self.reflesh()
 
         if proxy_row_index is not None:
             # 修改：直接定位
@@ -651,6 +659,16 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(
                     self, "提示", "新记录已保存，但当前筛选条件下不可见。"
                 )
+
+    def rowCopy(self):
+        pass
+
+    def reflesh(self):
+        # 先刷新模型（确保数据同步）
+        if self.model:
+            self.model.select()  # 从数据库重新加载（可选，若 submitAll 已更新则非必需）
+        if self.agent:
+            self.agent.invalidate()  # 刷新代理模型（重要！）
 
     ############## 设置 ##############
     def show_settings(self):
@@ -718,6 +736,26 @@ class MainWindow(QMainWindow):
                 proxy_row_index, self.col_checkmaxcount
             )
             checkmaxcount = self.model.data(checkmaxcount_index)
+
+            jigname_index = self.model.index(proxy_row_index, self.col_jigname)
+            jigname = self.model.data(jigname_index)
+            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
+            jigno = self.model.data(jigno_index)
+            jigtype_index = self.model.index(proxy_row_index, self.col_jigtype)
+            jigtype = self.model.data(jigtype_index)
+            jigmodel_index = self.model.index(proxy_row_index, self.col_jigmodel)
+            jigmodel = self.model.data(jigmodel_index)
+            msg = self.tr(
+                f"取用编号为{jigno}的{jigname}，适用于{jigtype}的{jigmodel}机种"
+            )
+            reply = QMessageBox.information(
+                self,
+                self.tr("取用"),
+                msg,
+                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
             warning = ""
             if usecount >= usemaxcount:
                 warning += self.tr("使用次数 ")
@@ -735,23 +773,11 @@ class MainWindow(QMainWindow):
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     return
-
-            jigname_index = self.model.index(proxy_row_index, self.col_jigname)
-            jigname = self.model.data(jigname_index)
-            jigno_index = self.model.index(proxy_row_index, self.col_jigno)
-            jigno = self.model.data(jigno_index)
-            jigtype_index = self.model.index(proxy_row_index, self.col_jigtype)
-            jigtype = self.model.data(jigtype_index)
-            jigmodel_index = self.model.index(proxy_row_index, self.col_jigmodel)
-            jigmodel = self.model.data(jigmodel_index)
             self.model.setData(usestatus_index, JigUseStatus.USING.value)
             self.model.submitAll()
             self.model.select()
-            msg = self.tr(
-                f"取用编号为{jigno}的{jigname}，适用于{jigtype}的{jigmodel}机种"
-            )
             logger.info(msg)
-            QMessageBox.information(self, self.tr("取用"), msg)
+            QMessageBox.information(self, self.tr("取用"), self.tr("取用成功!"))
         else:
             logger.error("异常的治具状态")
 
@@ -782,14 +808,21 @@ class MainWindow(QMainWindow):
             jigname = self.model.data(jigname_index)
             jigno_index = self.model.index(proxy_row_index, self.col_jigno)
             jigno = self.model.data(jigno_index)
+            msg = self.tr(f"归还编号为{jigno}的{jigname}")
+            reply = QMessageBox.information(
+                self,
+                self.tr("归还"),
+                msg + "?",
+                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
             self.model.setData(usecount_index, usecount + 1)
             self.model.setData(checkcount_index, checkcount + 1)
             self.model.setData(usestatus_index, JigUseStatus.UNUSE.value)
             self.model.submitAll()
             self.model.select()
-            msg = self.tr(f"编号为{jigno}的{jigname}已归还")
             logger.info(msg)
-            QMessageBox.information(self, self.tr("归还"), msg)
         else:
             logger.error("异常的治具状态")
 

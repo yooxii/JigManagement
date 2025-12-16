@@ -42,7 +42,7 @@ def init_enum_from_db(
             for k in init_data.keys():
                 df = pd.DataFrame(init_data)
                 df.to_sql(k, conn, index=False, if_exists="replace")
-                logger.info(f"已创建表 {k}")
+                logger.debug(f"已创建表 {k}")
     except Exception as e:
         logger.error(f"❌ 初始化数据库失败: {e}", exc_info=True)
         return False
@@ -85,7 +85,7 @@ def load_enum_from_db(
     data = {}
     for i, row in enumerate(datas):
         data["_" + str(i)] = row[0]
-    logger.info(f"已加载 {enum_name}")
+    logger.debug(f"已加载 {enum_name}")
     return Enum(enum_name, data, type=str)
 
 

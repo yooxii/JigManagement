@@ -107,7 +107,7 @@ class EnumManageWin(QDialog):
         if not db.open():
             QMessageBox(title="错误", text=f"数据库连接失败: {db.lastError().text()}")
             logger.error(f"数据库连接失败: {db.lastError().text()}")
-        logger.info(f"数据库连接成功: {db.databaseName()}")
+        logger.debug(f"数据库连接成功: {db.databaseName()}")
         self.db = db
 
     def setTablename(self, tablename: str):
@@ -176,7 +176,7 @@ class EnumManageWin(QDialog):
 
     def closeEvent(self, arg__1):
         self.db.close()
-        logger.info(f"数据库已关闭: {self.db.databaseName()}")
+        logger.debug(f"数据库已关闭: {self.db.databaseName()}")
         logger.info("关闭窗口")
         return super().closeEvent(arg__1)
 

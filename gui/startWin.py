@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+import datetime
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -21,8 +22,9 @@ from PySide6.QtWidgets import (
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from custom_utils.jiglogger import setup_logging, user_context_filter
 from gui.mainWin import MainWindow
+from custom_utils.mails import send_email
 
-setup_logging()
+setup_logging(log_level=logging.DEBUG)
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -42,6 +44,7 @@ data_path = os.path.join(root_path, "datas")
 class StartWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.email = None
 
         self.setMinimumSize(400, 200)
         self.setWindowTitle("治具管理系统")
@@ -85,9 +88,12 @@ class StartWindow(QMainWindow):
         )
         self.mainLayout.addLayout(self.formLayout)
 
-        self.label_username = QLabel(self.tr("用户名："))
+        self.label_username = QLabel(self.tr("工号："))
         self.line_username = QLineEdit()
         self.formLayout.addRow(self.label_username, self.line_username)
+        self.label_email = QLabel(self.tr("邮箱"))
+        self.line_email = QLineEdit()
+        self.formLayout.addRow(self.label_email, self.line_email)
         self.label_password = QLabel(self.tr("密码："))
         self.line_password = QLineEdit()
         self.line_password.setEchoMode(QLineEdit.EchoMode.Password)
@@ -110,14 +116,32 @@ class StartWindow(QMainWindow):
 
     def login(self):
         username = self.line_username.text()
+        self.email = self.line_email.text()
         password = self.line_password.text()
+        user_context_filter.current_user = username
         if username == "admin" and password == "ort":
-            user_context_filter.current_user = username
             logger.info(username + self.tr("登录成功！"))
             self.user_role = "admin"
-            self.startMainWin()
+            self.email_server = None
         else:
-            QMessageBox.warning(self, self.tr("错误"), self.tr("用户名或密码错误！"))
+            if not send_email(
+                subject="治具管理系统通知",
+                message=f"""<h2>有新的登录行为</h2>
+                <p>您在{datetime.datetime.now()}登录了治具管理系统。</p>""",
+                user_id=username,
+                from_addr=self.email,
+                to_addr=self.email,
+                pwd=password,
+            ):
+                QMessageBox.information(
+                    self,
+                    self.tr("登录错误"),
+                    self.tr("请检查输入，工号和邮箱一定要正确，邮箱为你使用的发件邮箱"),
+                    QMessageBox.StandardButton.Ok,
+                )
+                return
+            self.user_role = "user"
+        self.startMainWin()
 
     def guest(self):
         guestDlg = QDialog(self)
@@ -141,7 +165,7 @@ class StartWindow(QMainWindow):
         self.startMainWin()
 
     def startMainWin(self):
-        self.mainWin = MainWindow(self.user_role)
+        self.mainWin = MainWindow(self.user_role, self.email)
         self.mainWin.show()
         self.close()
 

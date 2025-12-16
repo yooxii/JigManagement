@@ -743,11 +743,11 @@ class PydanticFormWidget(QWidget):
                     if isinstance(value, py_date):
                         value = QDate(value.year, value.month, value.day)
                     source_model.setData(source_model.index(row, i), value)
-            logger.info(f"新增记录到行 {row}")
+            logger.debug(f"新增记录到行 {row}")
 
         # === 修改记录 ===
         else:
-            logger.info(f"修改记录模式，行索引: {self.proxy_row_index}")
+            logger.debug(f"修改记录模式，行索引: {self.proxy_row_index}")
             source_index = self.proxy_model.mapToSource(
                 self.proxy_model.index(self.proxy_row_index, 0)
             )
@@ -782,7 +782,7 @@ class PydanticFormWidget(QWidget):
 
         # 刷新代理模型（确保视图更新）
         self.proxy_model.invalidate()
-        logger.info("代理模型已刷新")
+        logger.debug("代理模型已刷新")
 
         # 调用自定义保存回调（可选）
         if self.save_callback:

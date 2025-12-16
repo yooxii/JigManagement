@@ -127,7 +127,7 @@ def create_table_from_pydantic_model(
     if table_name is None:
         table_name = model_class.__name__.lower()
 
-    logger.info(f"开始创建表 {table_name}，数据库路径: {db_path}")
+    logger.debug(f"开始创建表 {table_name}，数据库路径: {db_path}")
 
     # 生成完整 schema
     full_schema = model_class.model_json_schema()
@@ -165,11 +165,11 @@ def create_table_from_pydantic_model(
     try:
         if recreate:
             cursor.execute(drop_sql)
-            logger.info(f"已删除现有表 {table_name}")
+            logger.debug(f"已删除现有表 {table_name}")
         print(create_sql)
         cursor.execute(create_sql)
         conn.commit()
-        logger.info(f"✅ 表 '{table_name}' 已在数据库 '{db_path}' 中创建。")
+        logger.debug(f"✅ 表 '{table_name}' 已在数据库 '{db_path}' 中创建。")
         print(f"✅ 表 '{table_name}' 已在数据库 '{db_path}' 中创建。")
     except Exception as e:
         logger.error(f"❌ 创建表失败: {e}", exc_info=True)

@@ -42,12 +42,12 @@ Jigs = pd.DataFrame(
             "Location": fake.word(),
             "Remark": "",
         }
-        for i in range(1000)
+        for i in range(10)
     ]
 )
 # 打印第一行数据
 print(Jigs.head(1))
-Jigs.to_sql("Jig", con, index=False, if_exists="replace")
-
+# Jigs.to_sql("Jig", con, index=False, if_exists="replace")
+Jigs.to_html("Jig.html", index=False, max_rows=10)
 
 con.close()
